@@ -1,0 +1,8 @@
+# image size (ignored by parser but kept for reference)
+1280 800
+# poly_length followed by coefficients (Scaramuzza polynomial)
+8 258.7310 -1.7455e-01 3.6012e-03 -2.5440e-05 8.7200e-08 -1.5500e-10 1.4300e-13 -5.2600e-17
+# principal point (cy cx)
+398.5 639.5
+# affine parameters (c d e)
+0.9990 0.0015 -0.0008

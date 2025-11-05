@@ -1,0 +1,8 @@
+# translation (millimetres)
+1420.0     # trans_x
+20.0       # trans_y
+1440.0     # trans_z
+# rotation angles (degrees)
+0.4        # roll
+-1.2       # pitch
+89.8       # yaw
