@@ -46,6 +46,13 @@
 4) 特征匹配（可选）
 - 在重合区裁剪中带区域进行特征匹配，估计横向错位，折算成两侧重映射的缩放因子，迭代更新，抑制动态漂移（Soft：`soft_stitcher.cpp`，GL：`gl_stitcher.cpp`）。
 - 区域比例由 `FMRegionRatio` 控制；帧内/帧间策略由 `FeatureMatchStatus` 与 `ensure_stitch_path()` 控制。
+- Soft/GLES/Vulkan 后端共享一套流程：  
+  1. `StitcherImpl::init_feature_match` 根据 `FeatureMatchMode` 创建 `FeatureMatch` 对象，并为每个重叠区设置裁剪 ROI。球面模式默认取中间三分之一（`FMRegionRatio`），碗面模式选取靠墙区域以避开地面。  
+  2. 每帧 `start_overlap_task` 先执行融合，再在 Remap 完成的 overlap patch 上调用 `FeatureMatch::feature_match`。默认实现 `CVFeatureMatch` 采用 FAST+LK 光流，过滤跟踪误差大或纵向漂移超过阈值的点，并使用指数平滑/限幅更新 `_x_offset`；`CVFeatureMatchCluster` 额外做聚类去噪并估计 Y 方向偏移。  
+  3. 匹配得到的横向偏移在 `start_feature_match` 中按重叠中心位置转换成左右两侧的缩放因子，写入各相机的 `left/right_match_factor`。  
+  4. 下一帧重映射前 `init_geomap_factors` 取出累计因子，与 GeoMapper 当前 scale 相乘后回写，实现逐帧几何修正。`ScaleSingleConst` 对左右平均，`ScaleDualConst/DualCurve` 分别更新左右映射。  
+  5. `ensure_stitch_path` 根据 `FeatureMatchStatus` 和 `--fm-frames` 控制匹配是否持续运行：`WholeWay` 全程开启，`HalfWay` 在指定帧数后只保留融合，`FMFirst` 则先匹配若干帧再进入正常拼接。
+- 关键可调参数：`FMConfig`（最小角点数、平滑权重、递归阈值、最大调节量、纵向偏移/光流误差上限）、`FMRegionRatio`（球面模式下的垂直裁剪范围）、`FeatureMatchMode`（default/cluster/capi）以及 `FeatureMatchStatus`（wholeway/halfway/fmfirst）。这些都可通过 `Stitcher` 接口或测试程序命令行覆盖。
 
 5) 融合（Blending）与输出
 - 对重合区进行金字塔融合（pyr-level 可设为 1/2/...）；其余区域直接 Copy。
@@ -166,4 +173,3 @@ export FISHEYE_CONFIG_PATH=/path/to/calibration  # intrinsic_*.txt / extrinsic_*
 - 首先以 Soft 后端验证标定/几何是否正确，再切换到 GLES/Vulkan。
 - 逐层输出：原始输入、各路 GeoMap 输出、融合窗口输入/输出，以定位错位/缝隙问题。
 - 适当缩小 Top‑View/Cubemap 分辨率或降低金字塔层数，以便快速迭代。
-
