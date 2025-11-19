@@ -19,6 +19,8 @@
  * Author: Yinhang Liu <yinhangx.liu@intel.com>
  */
 
+// 本文件实现 Stitcher 基类及其配套的几何模型（BowlModel/CubeMapModel），负责
+// 拼接流程中的核心几何设置：相机参数初始化、输出切片划分、重叠区与复制区域计算等。
 #include "stitcher.h"
 #include "xcam_utils.h"
 #include "calibration_parser.h"
@@ -38,6 +40,7 @@
 
 namespace XCam {
 
+// 合并相邻 CopyArea 的辅助函数：当两个区域来自同一路输入并且在输入/输出上连续时，将其拼接为更大的块。
 static inline bool
 merge_neighbor_area (
     const Stitcher::CopyArea &current,
@@ -58,6 +61,7 @@ merge_neighbor_area (
     return false;
 }
 
+// 在需要跨越环形输出边界时，将 CopyArea 拆分为两段：一段落在末尾，另一段回绕至开头。
 static inline bool
 split_area_by_out (
     const Stitcher::CopyArea &area, const uint32_t round_width,
@@ -83,6 +87,7 @@ split_area_by_out (
     return false;
 }
 
+// 构造函数：指定输出图在 X/Y 方向上的对齐要求，初始化 Stitcher 的内部状态。
 Stitcher::Stitcher (uint32_t align_x, uint32_t align_y)
     : _alignment_x (align_x)
     , _alignment_y (align_y)
@@ -112,6 +117,7 @@ Stitcher::Stitcher (uint32_t align_x, uint32_t align_y)
     xcam_mem_clear (_viewpoints_range);
 }
 
+// 析构函数：释放 set_intrinsic_names/set_extrinsic_names 分配的字符串。
 Stitcher::~Stitcher ()
 {
     for (int idx = 0; idx < XCAM_STITCH_MAX_CAMERAS; ++idx) {
@@ -120,6 +126,7 @@ Stitcher::~Stitcher ()
     }
 }
 
+// 设置碗面模型参数，供 Bowl 去畸变及顶视图生成使用。
 bool
 Stitcher::set_bowl_config (const BowlDataConfig &config)
 {
@@ -127,6 +134,7 @@ Stitcher::set_bowl_config (const BowlDataConfig &config)
     return true;
 }
 
+// 设置相机数量，需在配置其它相机相关信息前调用。
 bool
 Stitcher::set_camera_num (uint32_t num)
 {
@@ -138,6 +146,7 @@ Stitcher::set_camera_num (uint32_t num)
     return true;
 }
 
+// 写入单路相机的 CalibrationInfo（内外参、角度范围等）。
 bool
 Stitcher::set_camera_info (uint32_t index, const CameraInfo &info)
 {
@@ -149,6 +158,7 @@ Stitcher::set_camera_info (uint32_t index, const CameraInfo &info)
     return true;
 }
 
+// 设定输入裁剪窗口：拼接时仅使用有效画面区域。
 bool
 Stitcher::set_crop_info (uint32_t index, const ImageCropInfo &info)
 {
@@ -161,6 +171,7 @@ Stitcher::set_crop_info (uint32_t index, const ImageCropInfo &info)
     return true;
 }
 
+// 读取指定相机的裁剪信息，若尚未设置将返回默认的零裁剪。
 bool
 Stitcher::get_crop_info (uint32_t index, ImageCropInfo &info) const
 {
@@ -172,6 +183,7 @@ Stitcher::get_crop_info (uint32_t index, ImageCropInfo &info) const
     return true;
 }
 
+// 配置特征匹配所裁剪的重叠区域比例，取值需在 [0,1] 范围。
 void
 Stitcher::set_fm_region_ratio (const FMRegionRatio &ratio)
 {
@@ -186,6 +198,7 @@ Stitcher::set_fm_region_ratio (const FMRegionRatio &ratio)
     _fm_region_ratio = ratio;
 }
 
+// 更新特征匹配执行状态：根据帧计数、模式决定是否需要运行匹配以及是否允许写出结果。
 bool
 Stitcher::ensure_stitch_path ()
 {
@@ -228,6 +241,7 @@ Stitcher::get_overlap_info (uint32_t index, ImageOverlapInfo &info) const
 }
 #endif
 
+// 查询指定索引的相机信息，通常供后端在生成 GeoMap/Table 时使用。
 bool
 Stitcher::get_camera_info (uint32_t index, CameraInfo &info) const
 {
@@ -239,6 +253,7 @@ Stitcher::get_camera_info (uint32_t index, CameraInfo &info) const
     return true;
 }
 
+// 设定各路相机的水平视角范围（以角度为单位），通常来源于配置文件。
 bool
 Stitcher::set_viewpoints_range (const float *range)
 {
@@ -253,6 +268,7 @@ Stitcher::set_viewpoints_range (const float *range)
     return true;
 }
 
+// 指定各路相机内参文本文件名称，后续 init_camera_info 会在 FISHEYE_CONFIG_PATH 下搜索。
 bool
 Stitcher::set_intrinsic_names (const char *intr_names[])
 {
@@ -267,6 +283,7 @@ Stitcher::set_intrinsic_names (const char *intr_names[])
     return true;
 }
 
+// 指定各路相机外参文本文件名称。
 bool
 Stitcher::set_extrinsic_names (const char *extr_names[])
 {
@@ -281,6 +298,12 @@ Stitcher::set_extrinsic_names (const char *extr_names[])
     return true;
 }
 
+/*
+ * 根据去畸变模式初始化每路相机的角度范围与外参：
+ *  - Sphere 模式：直接使用 set_viewpoints_range 提供的角度，round_angle_start 依据相机序号均匀分布。
+ *  - Bowl 模式：从 FISHEYE_CONFIG_PATH 指定目录读取 intrinsic/extrinsic 文本，填充 CameraInfo.calibration，
+ *    并对外参做平移归一化，以方便碗面坐标系的统一处理。
+ */
 XCamReturn
 Stitcher::init_camera_info ()
 {
@@ -332,6 +355,27 @@ Stitcher::init_camera_info ()
 XCamReturn
 Stitcher::estimate_round_slices ()
 {
+    /*
+     * 功能：根据每路相机的水平视场角（angle_range）以及希望生成的输出分辨率，
+     *       计算在环形输出图上对应的切片宽度、角度范围以及起始角度。Soft/GLES/Vulkan
+     *       后端都会在生成 GeoMapTable 之前调用该函数。
+     *
+     * 使用注意事项：
+     *  0. 该项目认为每路相机的角度范围都是对称的。由于鱼眼相机在边缘在矫正后较为模糊，如果相机安装的Yaw角较大，这种对称设计可能会让拼接效果不好。
+     *  1. 需要在调用之前正确设置 _camera_num、_output_width/_output_height、
+     *     每路 CameraInfo 的 angle_range 与 round_angle_start（例如通过 set_viewpoints_range
+     *     与 init_camera_info 完成）。否则将触发检查或得到错误切片。
+     *  2. 函数会按照 _alignment_x（通常为 8 或 16 像素）对切片宽度做对齐，
+     *     以保证后续缓冲区/几何映射的内存对齐要求，因此理论上的角度范围会和输入值有微小差异。
+     *  3. 若某路切片起点落在全景图边缘附近（constraint_margin），为了避免超出范围，
+     *     会强制把起点设置为 0°，这样可以确保首尾拼接时不会出现空洞。
+     *  4. 该函数仅对尚未设置过 round view 的 Stitcher 执行一次；若需要重新计算（比如
+     *     输出分辨率发生变化），必须先清除 _is_round_view_set 标志。
+     *
+     * TODO：
+     *  1. start_angle和end_angle改为非对称。
+     */
+
     if (_is_round_view_set)
         return XCAM_RETURN_NO_ERROR;
 
@@ -344,13 +388,16 @@ Stitcher::estimate_round_slices ()
         CameraInfo &cam_info = _camera_info[i];
         RoundViewSlice &view_slice = _round_view_slices[i];
 
+        /* _output_width和_output_height分别是平面全景图的宽度和高度分辨率？ */
         view_slice.width = cam_info.angle_range / 360.0f * (float)_output_width;
         view_slice.width = XCAM_ALIGN_UP (view_slice.width, _alignment_x);
         view_slice.height = _output_height;
-        view_slice.hori_angle_range = view_slice.width * 360.0f / (float)_output_width;
+        view_slice.hori_angle_range = view_slice.width * 360.0f / (float)_output_width; // Because of ALIGN UP op, view_slice.hori_angle_range ~= cam_info.angle_range !!
 
         uint32_t aligned_start = format_angle (cam_info.round_angle_start) / 360.0f * (float)_output_width;
         aligned_start = XCAM_ALIGN_AROUND (aligned_start, _alignment_x);
+
+        /* 如果相机对应的切片起点很靠近全景图两侧边缘，则将起点设置为全景图起点 */
         if (_output_width <= constraint_margin + aligned_start || aligned_start <= constraint_margin)
             aligned_start = 0;
         view_slice.hori_angle_start = format_angle((float)aligned_start / (float)_output_width * 360.0f);
@@ -365,6 +412,7 @@ Stitcher::estimate_round_slices ()
     return XCAM_RETURN_NO_ERROR;
 }
 
+// 如果外部没有手动提供 crop 信息，则初始化为全幅图像。
 XCamReturn
 Stitcher::estimate_coarse_crops ()
 {
@@ -385,7 +433,7 @@ Stitcher::estimate_coarse_crops ()
     return XCAM_RETURN_NO_ERROR;
 }
 
-// after crop done
+// 在裁剪信息就绪后，基于 round view 切片计算各路输出中心点位置，供后续拼接和 copy 区使用。
 XCamReturn
 Stitcher::mark_centers ()
 {
@@ -430,6 +478,35 @@ Stitcher::mark_centers ()
     return XCAM_RETURN_NO_ERROR;
 }
 
+// 依据中心位置和裁剪结果估算相邻相机之间的重叠窗口（包括输入子区域与输出窗口）。
+/*
+ * 函数作用：
+ *   根据 round view 切片、裁剪信息与中心点，估算相邻两路相机在输入/输出平面上的重叠区域，
+ *   将结果写入 _overlap_info[idx]。这些矩形后续会被 Soft/GLES/Vulkan 后端用来执行特征匹配、
+ *   融合或直接复制。
+ *
+ * 使用前置条件：
+ *   - 已调用 estimate_round_slices()，设置了切片宽度/角度；
+ *   - 已调用 estimate_coarse_crops()，准备好裁剪参数；
+ *   - 已调用 mark_centers()，计算好每路切片在输出/输入中的中心位置。
+ *   若上述任一未完成，函数会直接返回 XCAM_RETURN_ERROR_ORDER。
+ *
+ * 计算步骤概述：
+ *   1. 对每对相邻相机（左 idx、右 next_idx）：
+ *      - 从 CenterMark、CropInfo 获取各自的中心位置与有效裁剪区域；
+ *      - 计算两中心在输出上的距离 merge_width；
+ *      - 验证左右有效宽度之和是否大于 merge_width，若不是则说明两图无重叠（返回错误）；
+ *      - 依据宽度差得到真正的 overlap_width；
+ *      - 切出左侧重叠区（valid_left_img 的靠右部份）、右侧重叠区（valid_right_img 的靠左部份）；
+ *      - 生成输出平面中的重叠窗口（out_overlap），与输入宽度一致；
+ *      - 将 `left/right/out_area` 写入 _overlap_info[idx]。
+ *   2. 所有相邻对处理完毕后，设置 _is_overlap_set = true，避免重复计算。
+ *
+ * 注意事项：
+ *   - 若输出宽度设得过小，导致 merge_width >= valid_left + valid_right，会触发错误；
+ *   - 若某相机被裁剪过多，也可能导致不满足重叠条件；
+ *   - 输出区域目前仅用于水平位置，垂直坐标在 Soft 后端补偿时仍会使用。
+ */
 XCamReturn
 Stitcher::estimate_overlap ()
 {
@@ -575,6 +652,7 @@ Stitcher::estimate_overlap ()
     return XCAM_RETURN_NO_ERROR;
 }
 
+// 基于重叠信息生成 copy 区域列表，供非重叠部分直接复制（避免重复重映射）。
 XCamReturn
 Stitcher::update_copy_areas ()
 {
@@ -678,6 +756,7 @@ Stitcher::update_copy_areas ()
     return XCAM_RETURN_NO_ERROR;
 }
 
+// BowlModel 用于把碗面坐标与原始环视图之间互相映射，供顶视图、碗面渲染和 GeoMapper 使用。
 BowlModel::BowlModel (const BowlDataConfig &config, const uint32_t image_width, const uint32_t image_height)
     : _config (config)
     , _bowl_img_width (image_width)
@@ -690,6 +769,7 @@ BowlModel::BowlModel (const BowlDataConfig &config, const uint32_t image_width, 
     _max_topview_width_mm = mid * _config.b * 2.0f;
 }
 
+// 返回可生成的最大顶视图覆盖范围（毫米单位），便于调用方判断裁剪大小。
 bool
 BowlModel::get_max_topview_area_mm (float &length_mm, float &width_mm)
 {
@@ -700,17 +780,21 @@ BowlModel::get_max_topview_area_mm (float &length_mm, float &width_mm)
     return true;
 }
 
+// 生成顶视图到 ERP 碗面图的查找表：输入顶视图分辨率以及希望覆盖的物理尺寸。
+// 依据碗面模型生成顶视图到原始 ERP 图的查找表：输入顶视输出分辨率以及希望覆盖的物理尺寸。
 bool
 BowlModel::get_topview_rect_map (
     PointMap &texture_points,
     uint32_t res_width, uint32_t res_height,
     float length_mm, float width_mm)
 {
+    // 若未指定覆盖尺寸，则默认使用模型可支持的最大顶视范围。
     if (XCAM_DOUBLE_EQUAL_AROUND (length_mm, 0.0f) ||
             XCAM_DOUBLE_EQUAL_AROUND (width_mm, 0.0f)) {
         get_max_topview_area_mm (length_mm, width_mm);
     }
 
+    // 检查输入区域是否超过椭球表面可投影的最大范围，避免无效坐标。
     XCAM_FAIL_RETURN (
         ERROR,
         length_mm * length_mm / (_config.a * _config.a) / 4.0f + width_mm * width_mm / (_config.b * _config.b) / 4.0f +
@@ -718,20 +802,22 @@ BowlModel::get_topview_rect_map (
         false,
         "bowl model topview input area(L:%.2fmm, W:%.2fmm) is larger than max area", length_mm, width_mm);
 
-    float center_pos_x = res_width / 2.0f;
+    float center_pos_x = res_width / 2.0f;    // 顶视图像素坐标系的中心点
     float center_pos_y = res_height / 2.0f;
-    float mm_per_pixel_x = length_mm / res_width;
+    float mm_per_pixel_x = length_mm / res_width;   // 每个像素对应的实际长度（毫米）
     float mm_per_pixel_y = width_mm / res_height;
 
     texture_points.resize (res_width * res_height);
 
     for(uint32_t row = 0; row < res_height; row++) {
         for(uint32_t col = 0; col < res_width; col++) {
+            // 将顶视图像素转换为碗面上的三维坐标（以车辆中心为原点）。
             PointFloat3 world_pos (
                 (col - center_pos_x) * mm_per_pixel_x,
                 (center_pos_y - row) * mm_per_pixel_y,
                 0.0f);
 
+            // 将世界坐标映射回原始碗面图上的纹理坐标，供 GeoMapper 查表使用。
             PointFloat2 texture_pos = bowl_view_coords_to_image (
                                           _config, world_pos, _bowl_img_width, _bowl_img_height);
 
@@ -741,6 +827,7 @@ BowlModel::get_topview_rect_map (
     return true;
 }
 
+// 构建用于渲染的顶点/纹理坐标数据，将碗面图像映射到立体几何上。
 bool
 BowlModel::get_stitch_image_vertex_model (
     VertexMap &vertices, PointMap &texture_points, IndexVector &indeices,
@@ -789,6 +876,7 @@ BowlModel::get_stitch_image_vertex_model (
 }
 
 
+// 获取完整碗面高度的网格数据，用于碗面渲染。
 bool
 BowlModel::get_bowlview_vertex_model (
     VertexMap &vertices, PointMap &texture_points, IndexVector &indeices,
@@ -797,6 +885,7 @@ BowlModel::get_bowlview_vertex_model (
     return get_stitch_image_vertex_model (vertices, texture_points, indeices, res_width, res_height, (float)_bowl_img_height);
 }
 
+// 获取仅地面部分的网格数据（墙面保持垂直），用于顶视投影。
 bool
 BowlModel::get_topview_vertex_model (
     VertexMap &vertices, PointMap &texture_points, IndexVector &indeices,
@@ -808,6 +897,7 @@ BowlModel::get_topview_vertex_model (
     return get_stitch_image_vertex_model (vertices, texture_points, indeices, res_width, res_height, ground_image_height);
 }
 
+// CubeMapModel 负责把 ERP 图转换为立方体贴图布局，供渲染或纹理输出使用。
 CubeMapModel::CubeMapModel (
     const uint32_t image_width, const uint32_t image_height)
     : _erp_img_width(image_width)
@@ -824,6 +914,7 @@ enum CubeSide {
     CubeSideCount
 };
 
+// 工具函数：将三维向量归一化。
 static PointFloat3
 normalize(const PointFloat3& vec)
 {
@@ -831,6 +922,7 @@ normalize(const PointFloat3& vec)
     return {vec.x / sum_square, vec.y / sum_square, vec.z / sum_square};
 }
 
+// 根据 Cubemap 展开纹理上的像素位置，计算其位于立方体六面上的三维坐标。
 static PointFloat3
 get_cubemap_world_pos(
     const uint32_t u, const uint32_t v,
@@ -875,6 +967,7 @@ get_cubemap_world_pos(
     }
 }
 
+// 将单位球面坐标转换回 ERP（等距矩形投影）坐标。
 static PointFloat2
 world_to_erp (const PointFloat3& world_pos, uint32_t width, uint32_t height)
 {
@@ -887,6 +980,7 @@ world_to_erp (const PointFloat3& world_pos, uint32_t width, uint32_t height)
     };
 }
 
+// 遍历 Cubemap 输出的每个像素，计算其对应的 ERP 坐标。
 bool
 CubeMapModel::get_cubemap_rect_map(
     PointMap &texture_points,

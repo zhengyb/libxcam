@@ -21,6 +21,7 @@
 #ifndef XCAM_DEFS_H
 #define XCAM_DEFS_H
 
+//#define DEBUG 0
 #ifndef XCAM_LOG_ERROR
 #define XCAM_LOG_ERROR(format, ...)    \
     xcam_print_log ("XCAM ERROR %s:%d: " format "\n", __FILE__, __LINE__, ## __VA_ARGS__)

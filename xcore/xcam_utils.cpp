@@ -55,8 +55,8 @@ transform_bowl_coord_to_image_y (
         img_y = XCAM_CLAMP (img_y, 0.0f, wall_image_height - 1.0f);
     } else {
         float max_semimajor = config.b *
-                              sqrt (1 - config.center_z * config.center_z / (config.c * config.c));
-        float min_semimajor = max_semimajor - config.ground_length;
+                              sqrt (1 - config.center_z * config.center_z / (config.c * config.c)); // 碗底平面在Y轴方向的最大宽度，外圈
+        float min_semimajor = max_semimajor - config.ground_length; // Y轴方向上，车身边缘距离外圈的宽度
         XCAM_ASSERT (min_semimajor >= 0);
         XCAM_ASSERT (max_semimajor > min_semimajor);
         float step = ground_image_height / (max_semimajor - min_semimajor);
@@ -71,18 +71,32 @@ transform_bowl_coord_to_image_y (
     return img_y;
 }
 
+// 将碗面三维坐标转换为碗面纹理图的像素坐标：输出用于查表/采样。
 PointFloat2 bowl_view_coords_to_image (
     const BowlDataConfig &config,
     const PointFloat3 &bowl_pos,
     const uint32_t img_width, const uint32_t img_height)
 {
     PointFloat2 img_pos;
+    // X 轴映射仅与水平坐标相关（椭圆等角展开）。
     img_pos.x = transform_bowl_coord_to_image_x (bowl_pos.x, bowl_pos.y, img_width);
+    // Y 轴映射除了 X/Y，还需要碗面的高度（Z）以及椭圆的 c、中心高度等参数。
     img_pos.y = transform_bowl_coord_to_image_y (config, bowl_pos.x, bowl_pos.y, bowl_pos.z, img_height);
 
     return img_pos;
 }
 
+/*
+ * 功能：将顶视/碗面图上的二维像素坐标映射回碗面坐标系下的三维点，供 BowlFisheyeDewarp
+ *       在生成查找表时使用。图像的上半部分对应立体墙面，下半部分对应平面地面，因此需分段计算。
+ *
+ * 实现思路：
+ *   1. 根据图像比例计算“墙面”与“地面”的像素高度，并推导各自的步长（z_step/angle_step）。
+ *   2. 若像素落在墙面区域：根据像素高度推算 Z 值，并依据角度沿椭圆（a/b）求出 X/Y；
+ *      同时考虑碗中心高度 center_z 与椭圆半轴 c，确保点位于指定椭球面。
+ *   3. 若像素落在地面区域：通过将 a/b 缩放到地面高度并沿半椭圆插值，计算水平向的
+ *      X/Y 坐标，Z 固定为 0。
+ */
 PointFloat3 bowl_view_image_to_world (
     const BowlDataConfig &config,
     const uint32_t img_width, const uint32_t img_height,
@@ -95,15 +109,16 @@ PointFloat3 bowl_view_image_to_world (
     float b = config.b;
     float c = config.c;
 
-    float wall_image_height = config.wall_height / (config.wall_height + config.ground_length) * img_height;
-    float ground_image_height = img_height - wall_image_height;
+    float wall_image_height = config.wall_height / (config.wall_height + config.ground_length) * img_height; //墙面像素高度
+    float ground_image_height = img_height - wall_image_height; //地面像素高度
 
-    float z_step = config.wall_height / wall_image_height;
-    float angle_step = fabs(config.angle_end - config.angle_start) / img_width;
+    float z_step = config.wall_height / wall_image_height; //Y轴像素比例mm/px
+    float angle_step = fabs(config.angle_end - config.angle_start) / img_width; //X轴采样比例 deg/px
 
     if (img_pos.y < wall_image_height) {
-        world.z = config.wall_height - img_pos.y * z_step; // TODO world.z
-        angle = degree2radian (config.angle_start + img_pos.x * angle_step);
+        // 墙面区域：Z 值按高度比例线性衰减。
+        world.z = config.wall_height - img_pos.y * z_step;
+        angle = degree2radian (config.angle_start + img_pos.x * angle_step);//角度递增的方向是顺时针还是逆时针？
         float r2 = 1 - (world.z - config.center_z) * (world.z - config.center_z) / (c * c);
 
         if (XCAM_DOUBLE_EQUAL_AROUND (angle, XCAM_PI / 2)) {
@@ -120,6 +135,7 @@ PointFloat3 bowl_view_image_to_world (
             world.y = -world.x * tan(angle);
         }
     } else {
+        // 地面区域：根据 center_z 修正 a/b，然后沿地面长度线性缩放。
         a = a * sqrt(1 - config.center_z * config.center_z / (c * c));
         b = b * sqrt(1 - config.center_z * config.center_z / (c * c));
 
@@ -150,6 +166,12 @@ PointFloat3 bowl_view_image_to_world (
     return world;
 }
 
+
+/*
+ Bowl坐标系与相机坐标系中心对齐
+ 对齐后的参考坐标系： 原点4个相机安装位置（光心）的中心，只考虑xy，近视车辆中心; X轴向前朝向车头; Y轴向右朝向左边；不处理Z轴
+ 隐形约束： 4个相机同型号，参数差异不大；
+ */
 void centralize_bowl_coord_from_cameras (
     ExtrinsicParameter &front_cam, ExtrinsicParameter &right_cam,
     ExtrinsicParameter &rear_cam, ExtrinsicParameter &left_cam)

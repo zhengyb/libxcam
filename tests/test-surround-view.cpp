@@ -38,13 +38,22 @@
 
 using namespace XCam;
 
+/*
+ * 本测试程序结合 libxcam 的 Stitcher/GeoMapper 等组件，
+ * 演示从输入文件读入多路鱼眼图像并完成拼接、顶视图、Cubemap 等处理的完整流程。
+ * 代码结构主要分为：流对象管理、GeoMapper/Blender 初始化、特征匹配与性能统计、
+ * 以及命令行参数解析和主处理循环。注释中将针对各模块的职责、调用路径与关键参数进行说明。
+ */
+
 #define ENABLE_FISHEYE_IMG_ROI 0
 
+// 帧模式：Single 代表只读取一帧并循环处理；Multi 则连续读取多帧，适合视频输入。
 enum FrameMode {
     FrameSingle = 0,
     FrameMulti
 };
 
+// 拼接后端模块枚举：可在命令行选择 CPU Soft、OpenGL ES、Vulkan 等实现。
 enum SVModule {
     SVModuleNone    = 0,
     SVModuleSoft,
@@ -52,6 +61,7 @@ enum SVModule {
     SVModuleVulkan
 };
 
+// 输出配置，决定是否保存拼接结果、顶视图、立方体图及它们对应的输出流索引。
 struct SVOutConfig {
     bool save_output = true;
     uint32_t stitch_index = 0;
@@ -121,6 +131,12 @@ convert_to_dma_buffer (SmartPtr<VideoBuffer>& in_buf)
 }
 
 #endif
+
+/*
+ * SVStream 封装单路输入或输出流的基本属性，包括文件名称、分辨率、以及在不同后端下
+ * 对应的缓冲池创建逻辑。测试代码通过它来统一管理文件读写、GeoMapper 绑定以及
+ * Vulkan 设备句柄等信息，避免在主流程里散落大量条件编译。
+ */
 
 class SVStream
     : public Stream
@@ -209,6 +225,7 @@ SVStream::create_buf_pool (uint32_t reserve_count, uint32_t format)
     return XCAM_RETURN_NO_ERROR;
 }
 
+// 根据所选模块实例化对应的 Stitcher，Soft/GLES/Vulkan 之间共享统一接口。
 static SmartPtr<Stitcher>
 create_stitcher (const SmartPtr<SVStream> &stitch, SVModule module)
 {
@@ -234,6 +251,7 @@ create_stitcher (const SmartPtr<SVStream> &stitch, SVModule module)
     return stitcher;
 }
 
+// 拼接输出、顶视图等文件名需要带上语义前缀，此函数负责拼接目录和前缀。
 static void
 combine_name (const char *orig_name, const char *embedded_str, char *new_name)
 {
@@ -248,6 +266,7 @@ combine_name (const char *orig_name, const char *embedded_str, char *new_name)
     }
 }
 
+// 根据已有流的文件名自动生成同目录下的新流，并使用相同的分辨率信息。
 static void
 add_stream (SVStreams &streams, const char *stream_name, uint32_t width, uint32_t height)
 {
@@ -259,6 +278,7 @@ add_stream (SVStreams &streams, const char *stream_name, uint32_t width, uint32_
     streams.push_back (stream);
 }
 
+// 可选的输入调试输出：在启用 OpenCV 调试时，将原始鱼眼图保存到磁盘以便检查标定质量。
 static void
 write_in_image (const SmartPtr<Stitcher> &stitcher, const SVStreams &ins, uint32_t frame_num)
 {
@@ -316,6 +336,7 @@ write_in_image (const SmartPtr<Stitcher> &stitcher, const SVStreams &ins, uint32
 #endif
 }
 
+// 输出调试函数：默认写入原始缓冲，若打开调试宏则同时导出带帧号的图像文件。
 static void
 write_out_image (const SmartPtr<SVStream> &out, uint32_t frame_num)
 {
@@ -335,6 +356,7 @@ write_out_image (const SmartPtr<SVStream> &out, uint32_t frame_num)
 #endif
 }
 
+// 依据 Bowl 模型生成顶视图重映射表，并为目标流绑定 GeoMapper。
 static XCamReturn
 create_topview_mapper (
     const SmartPtr<Stitcher> &stitcher, const SmartPtr<SVStream> &stitch,
@@ -366,11 +388,13 @@ create_topview_mapper (
 
     mapper->set_output_size (topview->get_width (), topview->get_height ());
     mapper->set_lookup_table (points.data (), topview->get_width (), topview->get_height ());
+    /* TODO: save the mapper */
     topview->set_mapper (mapper);
 
     return XCAM_RETURN_NO_ERROR;
 }
 
+// 通用的重映射入口：利用前面创建的查找表把拼接图转换为其它视角。
 static XCamReturn
 remap_buf (const SmartPtr<SVStream> &stitch, const SmartPtr<SVStream> &topview)
 {
@@ -386,6 +410,7 @@ remap_buf (const SmartPtr<SVStream> &stitch, const SmartPtr<SVStream> &topview)
     return XCAM_RETURN_NO_ERROR;
 }
 
+// 构建 Cubemap 重映射器，核心区别在于使用 CubeMapModel 生成六面展开 LUT。
 static XCamReturn
 create_cubemap_mapper (
     const SmartPtr<Stitcher> &stitcher, const SmartPtr<SVStream> &stitch,
@@ -418,6 +443,7 @@ create_cubemap_mapper (
     return XCAM_RETURN_NO_ERROR;
 }
 
+// 写出一帧所有需要的结果：包含主拼接、可选的顶视图和立方体输出。
 static void
 write_image (
     const SmartPtr<Stitcher> &stitcher,
@@ -428,10 +454,13 @@ write_image (
 
     write_in_image (stitcher, ins, frame_num);
 
-    if (out_config.save_output)
+    if (out_config.save_output) {
+        // Bowl view 2D
         write_out_image (outs[out_config.stitch_index], frame_num);
+    }
 
     if (out_config.save_topview) {
+        // Topview 2D
         remap_buf (outs[out_config.stitch_index], outs[out_config.topview_index]);
         write_out_image (outs[out_config.topview_index], frame_num);
     }
@@ -444,6 +473,7 @@ write_image (
     frame_num++;
 }
 
+// 判断特征匹配是否已经稳定：用于控制 FPS 统计和输出时机。
 static bool
 stable_stitch (const SmartPtr<Stitcher> &stitcher)
 {
@@ -455,6 +485,7 @@ stable_stitch (const SmartPtr<Stitcher> &stitcher)
 
 XCAM_OBJ_PROFILING_DEFINES;
 
+// 单帧模式：预先读取所有输入，再多次调用 stitch_buffers，可用于压力测试。
 static int
 single_frame (
     const SmartPtr<Stitcher> &stitcher,
@@ -472,6 +503,7 @@ single_frame (
 
         XCAM_ASSERT (ins[i]->get_buf ().ptr ());
 
+        // GLES 路径下可选择把 CPU 缓冲转换成 dmabuf，以验证零拷贝流程。
         if (enable_dmabuf) {
 #if HAVE_GLES
             SmartPtr<DmaVideoBuffer> dma_buf = convert_to_dma_buffer (ins[i]->get_buf ());
@@ -490,6 +522,7 @@ single_frame (
         SmartPtr<VideoBuffer> out_dma_buf;
         if (enable_dmabuf) {
 #if HAVE_GLES
+            // 输出同样使用 dmabuf，可直接交给 GLES 管线进一步处理。
             out_dma_buf = convert_to_dma_buffer (outs[out_config.stitch_index]->get_buf ());
             CHECK (stitcher->stitch_buffers (in_buffers, out_dma_buf), "stitch buffer failed.");
 #else
@@ -523,6 +556,7 @@ single_frame (
     return 0;
 }
 
+// 多帧模式：循环从文件读取直到结束，适合处理视频序列或多帧原始数据。
 static int
 multi_frame (
     const SmartPtr<Stitcher> &stitcher,
@@ -531,49 +565,53 @@ multi_frame (
 {
     XCamReturn ret = XCAM_RETURN_NO_ERROR;
 
-    VideoBufferList in_buffers;
-    while (loop--) {
+    VideoBufferList in_buffers;                                       // 用于暂存当前帧的所有输入缓冲
+    while (loop--) {                                                  // 支持外层多次循环播放输入序列
         for (uint32_t i = 0; i < ins.size (); ++i) {
+            // 多帧模式需要反复从文件读取，因此每次进入 loop 时都将文件指针重置到开头。
             CHECK (ins[i]->rewind (), "rewind buffer from file(%s) failed", ins[i]->get_file_name ());
         }
 
         do {
-            in_buffers.clear ();
+            in_buffers.clear ();                                      // 一次拼接前清空输入列表
 
             for (uint32_t i = 0; i < ins.size (); ++i) {
-                ret = ins[i]->read_buf ();
-                if (ret == XCAM_RETURN_BYPASS)
+                ret = ins[i]->read_buf ();                            // 逐路拉取下一帧数据
+                if (ret == XCAM_RETURN_BYPASS)                        // 若某路到达文件末尾，则结束本轮
                     break;
                 CHECK (ret, "read buffer from file(%s) failed.", ins[i]->get_file_name ());
 
-                in_buffers.push_back (ins[i]->get_buf ());
+                in_buffers.push_back (ins[i]->get_buf ());            // 收集读到的缓冲供 Stitcher 使用
             }
             if (ret == XCAM_RETURN_BYPASS)
                 break;
 
-            XCAM_OBJ_PROFILING_START;
+            XCAM_OBJ_PROFILING_START;                                 // 性能统计起始
 
             CHECK (
                 stitcher->stitch_buffers (in_buffers, outs[out_config.stitch_index]->get_buf ()),
-                "stitch buffer failed.");
+                "stitch buffer failed.");                             // 将当前帧输入传给 Stitcher 完成拼接
 
             XCAM_OBJ_PROFILING_END ("stitch-buffers", XCAM_OBJ_DUR_FRAME_NUM);
 
+            // 若配置需要保存结果，并且 Stitcher 的特征匹配流程已经达到稳定状态，则写出文件
             if (out_config.is_save()) {
                 if (stitcher->complete_stitch ()) {
                     write_image (stitcher, ins, outs, out_config);
                 }
             }
 
+            // 拼接稳定后统计 FPS，避免特征匹配预热阶段影响平均值
             if (stable_stitch (stitcher)) {
                 FPS_CALCULATION (surround_view, XCAM_OBJ_DUR_FRAME_NUM);
             }
-        } while (true);
+        } while (true);                                               // 持续读取直到某路触发 BYPASS
     }
 
     return 0;
 }
 
+// 根据帧模式选择不同运行路径，同时初始化性能统计与输入流检查。
 static int
 run_stitcher (
     const SmartPtr<Stitcher> &stitcher,
@@ -596,6 +634,7 @@ run_stitcher (
     return ret;
 }
 
+// 打印命令行帮助信息，列出所有可配置的拼接参数。
 static void usage(const char* arg0)
 {
     printf ("Usage:\n"
@@ -643,18 +682,27 @@ static void usage(const char* arg0)
 
 int main (int argc, char *argv[])
 {
+    /* 单个鱼眼相机的默认采集分辨率，可通过 --in-w/--in-h 覆盖 */
     uint32_t input_width = 1280;
     uint32_t input_height = 800;
+    /*
+     * 主拼接结果（环视 ERP/Bowl）的输出分辨率。与 Stitcher::estimate_round_slices 中的计算配合，
+     * 输出宽度会决定每个回转切片的像素宽度，并且根据 `_alignment_x` 对齐到 8/16 像素，
+     * 这会导致真实的切片角度与原始 angle_range 之间存在极小偏差（通常允许）。
+     */
     uint32_t output_width = 1920;
     uint32_t output_height = 640;
+    /* 如果启用 --save-topview true，生成顶视图时使用的输出大小 */
     uint32_t topview_width = 1280;
     uint32_t topview_height = 720;
+    /* 启用 --save-cubemap true 时的立方体贴图尺寸 */
     uint32_t cubemap_width = 1280;
     uint32_t cubemap_height = 720;
 
-    SVStreams ins;
-    SVStreams outs;
+    SVStreams ins;   // 输入流容器，支持单路或多路鱼眼文件
+    SVStreams outs;  // 输出流容器，第一个元素始终为主拼接结果
 
+    /* 输入像素格式，默认 NV12，可切换到 YUV420 */
     uint32_t input_format = V4L2_PIX_FMT_NV12;
 
     uint32_t fisheye_num = 4;
@@ -678,8 +726,9 @@ int main (int argc, char *argv[])
 
     int loop = 1;
     int repeat = 1;
-    SVOutConfig out_config;
+    SVOutConfig out_config;  // 控制是否输出拼接/顶视图/Cubemap
 
+    /* getopt_long 参数描述表：列出所有命令行开关与其缩写 */
     const struct option long_opts[] = {
         {"module", required_argument, NULL, 'm'},
         {"dma", required_argument, NULL, 'M'},
@@ -717,6 +766,7 @@ int main (int argc, char *argv[])
     };
 
     int opt = -1;
+    /* 主循环解析命令行参数，将字符串转换成内部配置 */
     while ((opt = getopt_long(argc, argv, "", long_opts, NULL)) != -1) {
         switch (opt) {
         case 'm':
@@ -933,6 +983,7 @@ int main (int argc, char *argv[])
         return -1;
     }
 
+    // 基础合法性检查：输入流数量需与鱼眼数量匹配，输出至少包含拼接主流。
     if ((ins.size () != 1) && (ins.size () != fisheye_num)) {
         XCAM_LOG_ERROR (
             "multiple-input mode: conflicting input number(%lu) and fisheye number(%d)", ins.size (), fisheye_num);
@@ -947,6 +998,7 @@ int main (int argc, char *argv[])
     CHECK_EXP (outs.size () == 1 && outs[out_config.stitch_index].ptr (), "surrond view needs 1 output stream");
     CHECK_EXP (strlen (outs[out_config.stitch_index]->get_file_name ()), "output file name was not set");
 
+    // 输出当前配置，便于在命令行查看最终生效的参数组合。
     for (uint32_t i = 0; i < ins.size (); ++i) {
         printf ("input%d file:\t\t%s\n", i, ins[i]->get_file_name ());
     }
@@ -999,6 +1051,7 @@ int main (int argc, char *argv[])
         egl = EGLBase::instance ();
         XCAM_ASSERT (egl.ptr ());
 
+        // 未指定设备节点时使用默认 render 节点；否则按用户传入的 DRM 设备初始化。
         if (NULL == device_node) {
             XCAM_FAIL_RETURN (ERROR, egl->init (), -1, "init EGL failed");
         } else {
@@ -1019,6 +1072,7 @@ int main (int argc, char *argv[])
             return -1;
         }
 
+        // Vulkan 模块共用一个默认设备，并同时绑定到输入/输出流。
         SmartPtr<VKDevice> vk_dev = VKDevice::default_device ();
         for (uint32_t i = 0; i < ins.size (); ++i) {
             ins[i]->set_vk_device (vk_dev);
@@ -1032,6 +1086,7 @@ int main (int argc, char *argv[])
     }
 
 #if ENABLE_FISHEYE_IMG_ROI
+    // 针对部分相机型号，可手动裁剪有效鱼眼区域以减少冗余像素的开销。
     if (module == SVModuleGLES && (cam_model == CamC3C4K || cam_model == CamC3C8K || cam_model == CamC6C8K ||
                                    cam_model == CamD3C8K || cam_model == CamD6C8K)) {
         StitchInfo info = stitch_info (cam_model, scopic_mode);
@@ -1041,6 +1096,7 @@ int main (int argc, char *argv[])
         uint32_t *roi_radius = new uint32_t[XCAM_STITCH_FISHEYE_MAX_NUM];
         get_fisheye_img_roi_radius (cam_model, scopic_mode, roi_radius);
 
+        // 针对高分辨率机型，设置 GLES 后端的图像 ROI，避免无效区域参与拼接。
         for (uint32_t i = 0; i < ins.size (); i++) {
             SmartPtr<FisheyeImageFile> file = new FisheyeImageFile ();
             XCAM_ASSERT (file.ptr ());
@@ -1055,6 +1111,7 @@ int main (int argc, char *argv[])
     }
 #endif
 
+    // 初始化所有输入流的缓冲池与文件句柄。
     for (uint32_t i = 0; i < ins.size (); ++i) {
         ins[i]->set_module (module);
         ins[i]->set_buf_size (input_width, input_height);
@@ -1082,6 +1139,7 @@ int main (int argc, char *argv[])
 
         XCAM_LOG_DEBUG ("create stitcher and run test, remain repeat %d times", repeat);
 
+        // 每轮重新创建 Stitcher 以便验证重复运行的稳定性。
         SmartPtr<Stitcher> stitcher = create_stitcher (outs[out_config.stitch_index], module);
         XCAM_ASSERT (stitcher.ptr ());
 
@@ -1101,6 +1159,7 @@ int main (int argc, char *argv[])
         }
 #endif
 
+        // 视角范围决定每个相机在环视输出上的切片角度，这里根据车型读取默认配置。
         float *vp_range = new float[XCAM_STITCH_FISHEYE_MAX_NUM];
         stitcher->set_viewpoints_range (viewpoints_range (cam_model, vp_range));
         delete [] vp_range;
@@ -1110,27 +1169,50 @@ int main (int argc, char *argv[])
 
             get_fisheye_info (cam_model, scopic_mode, info.fisheye_info);
 
+            // 打印每路相机的标定参数，方便确认 JSON/文本配置是否加载成功。
             for (uint32_t cam_id = 0; cam_id < XCAM_STITCH_FISHEYE_MAX_NUM; cam_id++) {
-                XCAM_LOG_DEBUG ("cam[%d]: flip=%d ", cam_id, info.fisheye_info[cam_id].intrinsic.flip);
-                XCAM_LOG_DEBUG ("fx=%f ", info.fisheye_info[cam_id].intrinsic.fx);
-                XCAM_LOG_DEBUG ("fy=%f ", info.fisheye_info[cam_id].intrinsic.fy);
-                XCAM_LOG_DEBUG ("cx=%f ", info.fisheye_info[cam_id].intrinsic.cx);
-                XCAM_LOG_DEBUG ("cy=%f ", info.fisheye_info[cam_id].intrinsic.cy);
-                XCAM_LOG_DEBUG ("w=%d ", info.fisheye_info[cam_id].intrinsic.width);
-                XCAM_LOG_DEBUG ("h=%d ", info.fisheye_info[cam_id].intrinsic.height);
-                XCAM_LOG_DEBUG ("fov=%f ", info.fisheye_info[cam_id].intrinsic.fov);
-                XCAM_LOG_DEBUG ("skew=%f ", info.fisheye_info[cam_id].intrinsic.skew);
-                XCAM_LOG_DEBUG ("radius=%f ", info.fisheye_info[cam_id].radius);
-                XCAM_LOG_DEBUG ("distroy coeff=%f %f %f %f ", info.fisheye_info[cam_id].distort_coeff[0], info.fisheye_info[cam_id].distort_coeff[1], info.fisheye_info[cam_id].distort_coeff[2], info.fisheye_info[cam_id].distort_coeff[3]);
-                XCAM_LOG_DEBUG ("fisheye eluer angles: yaw:%f, pitch:%f, roll:%f", info.fisheye_info[cam_id].extrinsic.yaw, info.fisheye_info[cam_id].extrinsic.pitch, info.fisheye_info[cam_id].extrinsic.roll);
-                XCAM_LOG_DEBUG ("fisheye translation: x:%f, y:%f, z:%f", info.fisheye_info[cam_id].extrinsic.trans_x, info.fisheye_info[cam_id].extrinsic.trans_y, info.fisheye_info[cam_id].extrinsic.trans_z);
+                XCAM_LOG_INFO ("cam[%d]: flip=%d ", cam_id, info.fisheye_info[cam_id].intrinsic.flip);
+                XCAM_LOG_INFO ("fx=%f ", info.fisheye_info[cam_id].intrinsic.fx);
+                XCAM_LOG_INFO ("fy=%f ", info.fisheye_info[cam_id].intrinsic.fy);
+                XCAM_LOG_INFO ("cx=%f ", info.fisheye_info[cam_id].intrinsic.cx);
+                XCAM_LOG_INFO ("cy=%f ", info.fisheye_info[cam_id].intrinsic.cy);
+                XCAM_LOG_INFO ("w=%d ", info.fisheye_info[cam_id].intrinsic.width);
+                XCAM_LOG_INFO ("h=%d ", info.fisheye_info[cam_id].intrinsic.height);
+                XCAM_LOG_INFO ("fov=%f ", info.fisheye_info[cam_id].intrinsic.fov);
+                XCAM_LOG_INFO ("skew=%f ", info.fisheye_info[cam_id].intrinsic.skew);
+                XCAM_LOG_INFO ("radius=%f ", info.fisheye_info[cam_id].radius);
+                XCAM_LOG_INFO ("distroy coeff=%f %f %f %f ", info.fisheye_info[cam_id].distort_coeff[0], info.fisheye_info[cam_id].distort_coeff[1], info.fisheye_info[cam_id].distort_coeff[2], info.fisheye_info[cam_id].distort_coeff[3]);
+                XCAM_LOG_INFO ("fisheye eluer angles: yaw:%f, pitch:%f, roll:%f", info.fisheye_info[cam_id].extrinsic.yaw, info.fisheye_info[cam_id].extrinsic.pitch, info.fisheye_info[cam_id].extrinsic.roll);
+                XCAM_LOG_INFO ("fisheye translation: x:%f, y:%f, z:%f", info.fisheye_info[cam_id].extrinsic.trans_x, info.fisheye_info[cam_id].extrinsic.trans_y, info.fisheye_info[cam_id].extrinsic.trans_z);
             }
 
             stitcher->set_stitch_info (info);
         } else {
+            PointFloat3 camera_poss[XCAM_STITCH_MAX_CAMERAS];
+
             stitcher->set_intrinsic_names (intrinsic_names);
             stitcher->set_extrinsic_names (extrinsic_names);
-            stitcher->set_bowl_config (bowl_config (cam_model));
+            // 对于碗面模式，直接从文本文件读取标定参数并配置 Bowl 模型。
+            //stitcher->set_bowl_config (bowl_config (cam_model));
+
+            stitcher->init_camera_info (); // 提前提取camera info
+            const uint32_t cam_num = stitcher->get_camera_num ();
+
+            for (uint32_t i = 0; i < cam_num && i < XCAM_STITCH_MAX_CAMERAS; ++i) {
+                CameraInfo cam_info;
+                if (!stitcher->get_camera_info (i, cam_info)) {
+                    XCAM_LOG_ERROR ("fail to get info for %dth camera\n", i);
+                    continue;
+                }
+
+                const ExtrinsicParameter &extr = cam_info.calibration.extrinsic;
+                camera_poss[i].x = extr.trans_x;
+                camera_poss[i].y = extr.trans_y;
+                camera_poss[i].z = extr.trans_z;
+            }
+
+            BowlDataConfig bowl = cal_bowl_config (camera_poss, cam_num, 600.0f, 400.0f);
+            stitcher->set_bowl_config (bowl);
         }
 
         if (out_config.save_topview) {
@@ -1144,6 +1226,7 @@ int main (int argc, char *argv[])
                    "%s: estimate file format failed", outs[out_config.topview_index]->get_file_name ());
             CHECK (outs[out_config.topview_index]->open_writer ("wb"), "open output file(%s) failed", outs[out_config.topview_index]->get_file_name ());
 
+            // 为顶视图输出配置独立的 GeoMapper，以便在主循环中直接 remap。
             create_topview_mapper (stitcher, outs[out_config.stitch_index], outs[out_config.topview_index], module);
         }
 
@@ -1158,6 +1241,7 @@ int main (int argc, char *argv[])
                    "%s: estimate file format failed", outs[out_config.cubemap_index]->get_file_name ());
             CHECK (outs[out_config.cubemap_index]->open_writer ("wb"), "open output file(%s) failed", outs[out_config.cubemap_index]->get_file_name ());
 
+            // 为 Cubemap 输出创建映射，流程与顶视图类似。
             create_cubemap_mapper (stitcher, outs[out_config.stitch_index], outs[out_config.cubemap_index], module);
         }
         CHECK_EXP (

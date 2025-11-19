@@ -61,6 +61,14 @@ CalibrationParser::CalibrationParser ()
         continue; \
     }
 
+/* Intrinsic param file example:
+    #image size: "height" and "width"
+    1080 1920
+
+    8 260.1423 -1.8324e-01 3.9251e-03 -2.8740e-05 9.8120e-08 -1.7645e-10 1.6520e-13 -5.9800e-17
+    400.0 640.0
+    1.0000 0.0000 0.0000
+*/
 XCamReturn
 CalibrationParser::parse_intrinsic_param (char *file_body, IntrinsicParameter &intrinsic_param)
 {
@@ -72,8 +80,10 @@ CalibrationParser::parse_intrinsic_param (char *file_body, IntrinsicParameter &i
     static const char *str_tokens = " \t";
 
     do {
+        // 逐行解析，跳过空行或以 '#' 开头的注释。
         line_str = strtok_r (file_body, line_tokens, &line_endptr);
         CHECK_NULL (line_str);
+        // 跳过Line1
         tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
         while (tok_str == NULL || tok_str[0] == '#') {
             line_str = strtok_r (NULL, line_tokens, &line_endptr);
@@ -81,6 +91,7 @@ CalibrationParser::parse_intrinsic_param (char *file_body, IntrinsicParameter &i
             tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
         }
 
+        // Line 2: 开始读取多项式阶数以及系数（Scaramuzza 模型）。
         line_str = strtok_r (NULL, line_tokens, &line_endptr);
         CHECK_NULL (line_str);
         tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
@@ -89,7 +100,7 @@ CalibrationParser::parse_intrinsic_param (char *file_body, IntrinsicParameter &i
             CHECK_NULL (line_str);
             tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
         }
-        intrinsic_param.poly_length = strtol (tok_str, NULL, 10);
+        intrinsic_param.poly_length = strtol (tok_str, NULL, 10); // 阶数
 
         XCAM_FAIL_RETURN (
             ERROR, intrinsic_param.poly_length <= XCAM_INTRINSIC_MAX_POLY_SIZE,
@@ -97,12 +108,14 @@ CalibrationParser::parse_intrinsic_param (char *file_body, IntrinsicParameter &i
             "intrinsic poly length:%d is larger than max_size:%d.",
             intrinsic_param.poly_length, XCAM_INTRINSIC_MAX_POLY_SIZE);
 
+        // 多项式系数
         for (uint32_t i = 0; i < intrinsic_param.poly_length; i++) {
             tok_str = strtok_r (NULL, str_tokens, &tok_endptr);
             CHECK_NULL (tok_str);
             intrinsic_param.poly_coeff[i] = (strtof (tok_str, NULL));
         }
 
+        // Line 3: 主点坐标（cy, cx），注意文件里先写 cy 后写 cx。
         line_str = strtok_r (NULL, line_tokens, &line_endptr);
         CHECK_NULL (line_str);
         tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
@@ -117,6 +130,7 @@ CalibrationParser::parse_intrinsic_param (char *file_body, IntrinsicParameter &i
         CHECK_NULL (tok_str);
         intrinsic_param.cx = strtof(tok_str, NULL);
 
+        // Line 4: 仿射矩阵 c/d/e，对应像素横纵方向的剪切与缩放。
         line_str = strtok_r (NULL, line_tokens, &line_endptr);
         CHECK_NULL (line_str);
         tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
@@ -139,6 +153,16 @@ CalibrationParser::parse_intrinsic_param (char *file_body, IntrinsicParameter &i
     return XCAM_RETURN_NO_ERROR;
 }
 
+/* Extrinsic param file example:
+    # translation (mm)
+    0.0        # trans_x
+    1380.0     # trans_y
+    1420.0     # trans_z
+    # rotation (degree)
+    0.0        # roll
+    -1.5       # pitch
+    0.2        # yaw
+*/
 XCamReturn
 CalibrationParser::parse_extrinsic_param (char *file_body, ExtrinsicParameter &extrinsic_param)
 {
@@ -150,6 +174,7 @@ CalibrationParser::parse_extrinsic_param (char *file_body, ExtrinsicParameter &e
     static const char *str_tokens = " \t";
 
     do {
+        // 顺序解析 6 行数值，每行都会跳过空行与 '#' 注释。
         line_str = strtok_r (file_body, line_tokens, &line_endptr);
         CHECK_NULL (line_str);
         tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
@@ -158,7 +183,7 @@ CalibrationParser::parse_extrinsic_param (char *file_body, ExtrinsicParameter &e
             CHECK_NULL (line_str);
             tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
         }
-        extrinsic_param.trans_x = strtof (tok_str, NULL);
+        extrinsic_param.trans_x = strtof (tok_str, NULL);   // 平移 X（毫米）
 
         line_str = strtok_r (NULL, line_tokens, &line_endptr);
         CHECK_NULL (line_str);
@@ -168,7 +193,7 @@ CalibrationParser::parse_extrinsic_param (char *file_body, ExtrinsicParameter &e
             CHECK_NULL(line_str);
             tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
         }
-        extrinsic_param.trans_y = strtof (tok_str, NULL);
+        extrinsic_param.trans_y = strtof (tok_str, NULL);   // 平移 Y（毫米）
 
         line_str = strtok_r (NULL, line_tokens, &line_endptr);
         CHECK_NULL (line_str);
@@ -178,7 +203,7 @@ CalibrationParser::parse_extrinsic_param (char *file_body, ExtrinsicParameter &e
             CHECK_NULL (line_str);
             tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
         }
-        extrinsic_param.trans_z = strtof (tok_str, NULL);
+        extrinsic_param.trans_z = strtof (tok_str, NULL);   // 平移 Z（毫米）
 
         line_str = strtok_r (NULL, line_tokens, &line_endptr);
         CHECK_NULL (line_str);
@@ -188,7 +213,7 @@ CalibrationParser::parse_extrinsic_param (char *file_body, ExtrinsicParameter &e
             CHECK_NULL (line_str);
             tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
         }
-        extrinsic_param.roll = strtof (tok_str, NULL);
+        extrinsic_param.roll = strtof (tok_str, NULL);      // 翻滚角（度）
 
         line_str = strtok_r (NULL, line_tokens, &line_endptr);
         CHECK_NULL (line_str);
@@ -198,7 +223,7 @@ CalibrationParser::parse_extrinsic_param (char *file_body, ExtrinsicParameter &e
             CHECK_NULL (line_str);
             tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
         }
-        extrinsic_param.pitch = strtof (tok_str, NULL);
+        extrinsic_param.pitch = strtof (tok_str, NULL);     // 俯仰角（度）
 
         line_str = strtok_r (NULL, line_tokens, &line_endptr);
         CHECK_NULL (line_str);
@@ -208,7 +233,7 @@ CalibrationParser::parse_extrinsic_param (char *file_body, ExtrinsicParameter &e
             CHECK_NULL (line_str);
             tok_str = strtok_r (line_str, str_tokens, &tok_endptr);
         }
-        extrinsic_param.yaw = strtof (tok_str, NULL);
+        extrinsic_param.yaw = strtof (tok_str, NULL);       // 偏航角（度）
     } while (0);
 
     return XCAM_RETURN_NO_ERROR;
@@ -238,8 +263,19 @@ CalibrationParser::parse_intrinsic_file (const char *file_path, IntrinsicParamet
         "read intrinsic file(%s) failed, file size:%d.", file_path, (int)file_size);
     file_reader.close ();
     context[file_size] = '\0';
+    ret = parse_intrinsic_param (&context[0], intrinsic_param);
+    XCAM_FAIL_RETURN (
+        ERROR, xcam_ret_is_ok (ret), ret,
+        "parse intrinsic params(%s) failed", file_path);
 
-    return parse_intrinsic_param (&context[0], intrinsic_param);
+    XCAM_LOG_INFO (
+        "CalibrationParser::parse_intrinsic_file parsed intrinsic file(%s): poly_length=%u, cx=%f, cy=%f, c=%f, d=%f, e=%f",
+        file_path,
+        intrinsic_param.poly_length,
+        intrinsic_param.cx, intrinsic_param.cy,
+        intrinsic_param.c, intrinsic_param.d, intrinsic_param.e);
+
+    return ret;
 }
 
 XCamReturn
@@ -266,8 +302,18 @@ CalibrationParser::parse_extrinsic_file (const char *file_path, ExtrinsicParamet
         "read extrinsic file(%s) failed, file size:%d.", file_path, (int)file_size);
     file_reader.close ();
     context[file_size] = '\0';
+    ret = parse_extrinsic_param (&context[0], extrinsic_param);
+    XCAM_FAIL_RETURN (
+        ERROR, xcam_ret_is_ok (ret), ret,
+        "parse extrinsic params(%s) failed", file_path);
 
-    return parse_extrinsic_param (&context[0], extrinsic_param);
+    XCAM_LOG_INFO (
+        "CalibrationParser::parse_extrinsic_file parsed extrinsic file(%s): trans(mm)=(%f,%f,%f), euler(deg)=(roll:%f,pitch:%f,yaw:%f)",
+        file_path,
+        extrinsic_param.trans_x, extrinsic_param.trans_y, extrinsic_param.trans_z,
+        extrinsic_param.roll, extrinsic_param.pitch, extrinsic_param.yaw);
+
+    return ret;
 }
 
 XCamReturn
@@ -282,6 +328,7 @@ CalibrationParser::parse_calib_file (const char *file_path, std::vector<Calibrat
     std::vector<char> context;
     size_t file_size = 0;
 
+    printf("CalibrationParser::parse_calib_file\n");
     XCAM_FAIL_RETURN (
         WARNING, xcam_ret_is_ok (ret = file_reader.open (file_path, "r")), ret,
         "open calibration file(%s) failed.", file_path);

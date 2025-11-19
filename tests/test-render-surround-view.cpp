@@ -406,7 +406,7 @@ run_stitcher (
             std::vector<float*> result_ptr;
 
             for (uint32_t batch_idx = 0; batch_idx < batch_size; batch_idx ++) {
-                for (uint32_t output_idx = 0; output_idx <infer_engine->get_output_size () ; output_idx ++) {
+                for (uint32_t output_idx = 0; output_idx < infer_engine->get_output_size () ; output_idx ++) {
                     result_ptr.push_back ((float*)infer_engine->get_inference_results (output_idx, blob_size));
                 }
                 if (result_ptr.empty()) {
@@ -546,6 +546,7 @@ int main (int argc, char *argv[])
 
     const char *car_name = NULL;
 
+    char *module_str = NULL;
     SVModule module = SVModuleGLES;
     GeoMapScaleMode scale_mode = ScaleSingleConst;
     FeatureMatchMode fm_mode = FMNone;
@@ -574,6 +575,7 @@ int main (int argc, char *argv[])
         switch (opt) {
         case 'm':
             XCAM_ASSERT (optarg);
+            module_str = optarg;
             if (!strcasecmp (optarg, "soft")) {
                 module = SVModuleSoft;
             } else if (!strcasecmp (optarg, "gles")) {
@@ -669,6 +671,7 @@ int main (int argc, char *argv[])
 
     CHECK_EXP (outs.size () == 1 && outs[0].ptr (), "surrond view needs 1 output stream");
 
+    printf("module:\t\t%s\n", module_str);
     for (uint32_t i = 0; i < ins.size (); ++i) {
         printf ("input%d file:\t\t%s\n", i, ins[i]->get_file_name ());
     }
@@ -752,8 +755,8 @@ int main (int argc, char *argv[])
     SmartPtr<RenderOsgModel> sv_model = create_surround_view_model (stitcher, output_width, output_height);
     render->add_model (sv_model);
 
-    SmartPtr<RenderOsgModel> car_model = create_car_model (car_name);
-    render->add_model (car_model);
+    //SmartPtr<RenderOsgModel> car_model = create_car_model (car_name);
+    //render->add_model (car_model);
 
     render->validate_model_groups ();
 

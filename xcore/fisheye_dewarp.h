@@ -122,6 +122,21 @@ private:
     virtual void cal_img_coord (const PointFloat3 &cam_coord, PointFloat2 &img_coord);
 }; // Adopt Scaramuzza's approach to calculate image coordinates from camera coordinates
 
+
+// Fixme (Reuben): we can adopt opencv fisheye's approach to calculate image coordinates from camera coordinates here
+/*
+class OpencvBowlFisheyeDewarp
+    : public BowlFisheyeDewarp
+{
+public:
+    explicit OpencvBowlFisheyeDewarp () {}
+
+private:
+    virtual void cal_img_coord (const PointFloat3 &cam_coord, PointFloat2 &img_coord);
+}; // Adopt Scaramuzza's approach to calculate image coordinates from camera coordinates
+
+*/
+
 }
 
 #endif // XCAM_FISHEYE_DEWARP_H

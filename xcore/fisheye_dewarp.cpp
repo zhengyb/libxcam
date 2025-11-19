@@ -172,6 +172,7 @@ BowlFisheyeDewarp::get_intr_param ()
     return _intr_param;
 }
 
+// 生成 Bowl 模型下的去畸变查找表：遍历缩略坐标系，把每个输出像素映射回原始鱼眼图。
 void
 BowlFisheyeDewarp::gen_table (FisheyeDewarp::MapTable &map_table)
 {
@@ -179,26 +180,31 @@ BowlFisheyeDewarp::gen_table (FisheyeDewarp::MapTable &map_table)
     get_out_size (out_w, out_h);
     get_table_size (tbl_w, tbl_h);
 
-    XCAM_LOG_DEBUG ("fisheye-dewarp:\n table_size(%dx%d) out_size(%dx%d) "
-                    "bowl(start:%.1f, end:%.1f, ground:%.2f, wall:%.2f, a:%.2f, b:%.2f, c:%.2f, center_z:%.2f)",
-                    tbl_w, tbl_h, out_w, out_h,
-                    _bowl_cfg.angle_start, _bowl_cfg.angle_end,
-                    _bowl_cfg.ground_length, _bowl_cfg.wall_height,
-                    _bowl_cfg.a, _bowl_cfg.b, _bowl_cfg.c, _bowl_cfg.center_z);
+    XCAM_LOG_INFO ("#####fisheye-dewarp gen_table()######:\n table_size(%dx%d) out_size(%dx%d) "
+                   "bowl(start:%.1f, end:%.1f, ground:%.2f, wall:%.2f, a:%.2f, b:%.2f, c:%.2f, center_z:%.2f)",
+                   tbl_w, tbl_h, out_w, out_h,
+                   _bowl_cfg.angle_start, _bowl_cfg.angle_end,
+                   _bowl_cfg.ground_length, _bowl_cfg.wall_height,
+                   _bowl_cfg.a, _bowl_cfg.b, _bowl_cfg.c, _bowl_cfg.center_z);
 
     float scale_factor_w = (float) out_w / tbl_w;
     float scale_factor_h = (float) out_h / tbl_h;
 
     PointFloat2 img_coord, out_pos;
     PointFloat3 world_coord, cam_coord, cam_world_coord;
+    // 遍历 LUT 的每个采样点：先根据表格分辨率推算对应的输出像素，再一步步投影回鱼眼图。
     for(uint32_t row = 0; row < tbl_h; row++) {
         for(uint32_t col = 0; col < tbl_w; col++) {
             out_pos.x = col * scale_factor_w;
             out_pos.y = row * scale_factor_h;
 
+            // 1) 输出平面像素 -> 碗面世界坐标（bowl_view_image_to_world）
             world_coord = bowl_view_image_to_world (_bowl_cfg, out_w, out_h, out_pos);
+            // 2) 将碗面坐标换算到当前摄像头所在的世界系（cal_cam_world_coord）
             cal_cam_world_coord (world_coord, cam_world_coord);
+            // 3) 再转换到相机坐标系（world_coord2cam）
             world_coord2cam (cam_world_coord, cam_coord);
+            // 4) 利用鱼眼多项式模型求出对应的图像平面坐标（cal_img_coord）
             cal_img_coord (cam_coord, img_coord);
 
             map_table[row * tbl_w + col] = img_coord;
@@ -228,6 +234,7 @@ BowlFisheyeDewarp::cal_cam_world_coord (const PointFloat3 &world_coord, PointFlo
     cam_world_coord.z = cam_world_coord_mat (2, 3);
 }
 
+
 Mat4f
 BowlFisheyeDewarp::generate_rotation_matrix (float roll, float pitch, float yaw)
 {
@@ -252,9 +259,20 @@ BowlFisheyeDewarp::generate_rotation_matrix (float roll, float pitch, float yaw)
 void
 BowlFisheyeDewarp::world_coord2cam (const PointFloat3 &cam_world_coord, PointFloat3 &cam_coord)
 {
+
+#if 0
+    /*
+    */
     cam_coord.x = -cam_world_coord.y;
     cam_coord.y = -cam_world_coord.z;
     cam_coord.z = -cam_world_coord.x;
+#else
+    /* Reuben: 我们外参文件直接给出了相机在ego坐标系下的姿态，因此cam_coord = cam_world_coord
+    */
+    cam_coord.x = cam_world_coord.x;
+    cam_coord.y = cam_world_coord.y;
+    cam_coord.z = cam_world_coord.z;
+#endif
 }
 
 void
@@ -264,18 +282,38 @@ BowlFisheyeDewarp::cal_img_coord (const PointFloat3 &cam_coord, PointFloat2 &img
     img_coord.y = cam_coord.y;
 }
 
+/*
+ * 作用：根据 Scaramuzza 多项式模型，把相机坐标系下的三维点 (cam_coord) 映射回鱼眼图像
+ *       平面上的二维坐标。此多项式由标定得到的 intr.poly_coeff[] 表示。
+ *
+ * 计算步骤：
+ *   1. 计算像素点到光轴的距离 dist2center 以及与光轴的夹角 angle；
+ *   2. 把角度代入多项式 ∑(poly_coeff[i] * angle^i)，得到半径缩放 poly_sum；
+ *   3. 根据多项式输出将 cam_coord.x/y 投影为 img_x/img_y，并应用内参中的仿射项 c/d/e 以及主点偏移 cx/cy；
+ *   4. 若点落在光轴上（dist2center 为 0），直接返回主点坐标。
+ */
+#if 0
 void
 PolyBowlFisheyeDewarp::cal_img_coord (const PointFloat3 &cam_coord, PointFloat2 &img_coord)
 {
+    static int flag = 0;
     float dist2center = sqrt (cam_coord.x * cam_coord.x + cam_coord.y * cam_coord.y);
-    float angle = atan (cam_coord.z / dist2center);
+    float angle;
 
     float p = 1;
     float poly_sum = 0;
 
-    const IntrinsicParameter intr = get_intr_param ();
+    const float close_zero = 0.0001;
 
-    if (dist2center != 0) {
+    const IntrinsicParameter intr = get_intr_param (); //相机内参
+
+    if (!flag) {
+        printf("######## Use PolyBowlFisheyeDewarp::cal_img_coord()\n");
+        flag = 1;
+    }
+    //if (dist2center != 0) {
+    if (dist2center > close_zero) {
+        angle = atan (cam_coord.z / dist2center);
         for (uint32_t i = 0; i < intr.poly_length; i++) {
             poly_sum += intr.poly_coeff[i] * p;
             p = p * angle;
@@ -287,9 +325,51 @@ PolyBowlFisheyeDewarp::cal_img_coord (const PointFloat3 &cam_coord, PointFloat2 
         img_coord.x = img_x * intr.c + img_y * intr.d + intr.cx;
         img_coord.y = img_x * intr.e + img_y + intr.cy;
     } else {
-        img_coord.x = intr.cy;
+        // 光轴上的点映射到主点位置。
+        img_coord.x = intr.cx;
         img_coord.y = intr.cy;
     }
 } // Adopt Scaramuzza's approach to calculate image coordinates from camera coordinates
 
+#else // pyOcamCalib
+void
+PolyBowlFisheyeDewarp::cal_img_coord (const PointFloat3 &cam_coord, PointFloat2 &img_coord)
+{
+    const IntrinsicParameter intr = get_intr_param ();
+    const float close_zero = 1e-4f;
+    float p = 1;
+
+    const float X = cam_coord.x;
+    const float Y = cam_coord.y;
+    const float Z = cam_coord.z;
+
+    float r = std::sqrt (X * X + Y * Y);              // perspective_radius
+    float len = std::sqrt (r * r + Z * Z);            // ||P||
+
+    if (r <= close_zero) {
+        // 光轴上的点 -> 主点
+        img_coord.x = intr.cx;
+        img_coord.y = intr.cy;
+        return;
+    }
+
+    float poly_sum = 0;
+    float cos_theta = Z / len;
+    // 数值稳定
+    cos_theta = XCAM_CLAMP (cos_theta, -1.0f, 1.0f);
+    float theta = std::acos (cos_theta);
+
+    for (uint32_t i = 0; i < intr.poly_length; i++) {
+        poly_sum += intr.poly_coeff[i] * p;
+        p = p * theta;
+    }
+
+    float img_x = cam_coord.x * poly_sum / r;
+    float img_y = cam_coord.y * poly_sum / r;
+
+    img_coord.x = img_x * intr.c + img_y * intr.d + intr.cx;
+    img_coord.y = img_x * intr.e + img_y + intr.cy;
+
+} // Adopt Scaramuzza's approach to calculate image coordinates from camera coordinates
+#endif
 }

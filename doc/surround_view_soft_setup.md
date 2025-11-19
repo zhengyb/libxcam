@@ -56,16 +56,17 @@ export OSG_FILE_PATH=$FISHEYE_CONFIG_PATH:${OSG_FILE_PATH:-}
   ```bash
   ./tests/.libs/test-surround-view \
     --module soft \
-    --input front_1280x800.nv12 \
-    --input right_1280x800.nv12 \
-    --input rear_1280x800.nv12 \
-    --input left_1280x800.nv12 \
-    --in-w 1280 --in-h 800 \
+    --input ./inputs/usb_cameras_003/front_1280x720.nv12 \
+    --input ./inputs/usb_cameras_003/right_1280x720.nv12 \
+    --input ./inputs/usb_cameras_003/rear_1280x720.nv12 \
+    --input ./inputs/usb_cameras_003/left_1280x720.nv12 \
+    --in-w 1280 --in-h 720 \
     --out-w 1920 --out-h 640 \
     --scale-mode singleconst \
+    --frame-mode single \
     --fm-mode none \
     --save true \
-    --save-topview true --topview-w 1280 --topview-h 720 \
+    --save-topview true --topview-w 720 --topview-h 1280 \
     --save-cubemap false
   ```
   生成的输出文件会以默认前缀保存在当前目录。

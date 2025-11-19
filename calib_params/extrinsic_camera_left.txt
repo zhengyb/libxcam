@@ -1,0 +1,9 @@
+#translation (units)
+  7.75431968        # trans_x
+  49.9844403        # trans_y
+  219.684257        # trans_z
+#rotation (degree)
+  -138.079899        # roll
+  -0.328794835        # pitch
+  0.649988949        # yaw
+

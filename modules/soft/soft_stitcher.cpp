@@ -44,7 +44,8 @@
 #define MAP_FACTOR_X  16
 #define MAP_FACTOR_Y  16
 
-#define DUMP_STITCHER 0
+// 打开后可在本地生成各种调试文件（拼接输出、LUT 等），默认关闭以免影响性能。
+#define DUMP_STITCHER 1
 #define DUMP_STITCHER_FOLDER "."
 
 namespace XCam {
@@ -80,6 +81,7 @@ stitcher_dump_fisheye_lut (FisheyeDewarp::MapTable &lut, ...) {
 }
 #endif
 
+// SoftStitcher 私有实现细节放在命名空间 SoftStitcherPriv 中，便于与公共接口解耦。
 namespace SoftStitcherPriv {
 
 DECLARE_HANDLER_CALLBACK (CbGeoMap, SoftStitcher, geomap_done);
@@ -129,6 +131,7 @@ struct StitcherCopyArgs
     {}
 };
 
+// 特征匹配得出的缩放因子，用于调整 GeoMapper 的左右尺度。
 struct Factor {
     float x, y;
 
@@ -139,6 +142,7 @@ struct Factor {
     }
 };
 
+// 记录每个相邻拼接对的 FeatureMatch/Blender 状态与参数缓存。
 struct Overlap {
     SmartPtr<FeatureMatch>       matcher;
     SmartPtr<SoftBlender>        blender;
@@ -149,6 +153,7 @@ struct Overlap {
         const uint32_t idx);
 };
 
+// 每路鱼眼对应的 GeoMapper + 缓冲池封装，负责去畸变以及特征匹配带来的尺度修正。
 struct FisheyeMap {
     SmartPtr<SoftGeoMapper>      mapper;
     SmartPtr<BufferPool>         buf_pool;
@@ -241,6 +246,7 @@ XCamReturn
 FisheyeMap::set_map_table (
     SoftStitcher *stitcher, const Stitcher::RoundViewSlice &view_slice, uint32_t cam_idx)
 {
+    // 根据去畸变模式选择 PolyBowl/Sphere 实现，并生成当前摄像头的查找表。
     SmartPtr<FisheyeDewarp> dewarper;
     if(dewarp_mode == DewarpBowl) {
         BowlDataConfig bowl = stitcher->get_bowl_config ();
@@ -377,6 +383,7 @@ SmartPtr<SoftGeoMapper>
 StitcherImpl::create_geo_mapper (const Stitcher::RoundViewSlice &view_slice)
 {
     SmartPtr<SoftGeoMapper> mapper;
+    // 根据缩放模式选择不同 GeoMapper 实现：SingleConst/ DualConst/ DualCurve。
     if (_stitcher->get_scale_mode () == ScaleSingleConst)
         mapper = new SoftGeoMapper ("stitcher_remapper");
     else if (_stitcher->get_scale_mode () == ScaleDualConst)
@@ -457,6 +464,7 @@ StitcherImpl::init_feature_match (uint32_t idx)
 {
 #if ENABLE_FEATURE_MATCH
 
+    // 按命令行指定的模式创建不同的特征匹配器（默认/聚类/C API），并配置裁剪区域。
 #ifndef ANDROID
     FeatureMatchMode fm_mode = _stitcher->get_fm_mode ();
     if (fm_mode == FMNone)
@@ -672,6 +680,7 @@ StitcherImpl::start_geomap_works (const SmartPtr<SoftStitcher::StitcherParam> &p
 {
     uint32_t camera_num = _stitcher->get_camera_num ();
 
+    // 依次对每路相机执行 GeoMapper：将输入鱼眼 remap 到中间缓冲，作为后续拼接的基础。
     for (uint32_t i = 0; i < camera_num; ++i) {
         SmartPtr<VideoBuffer> out_buf = _fisheye[i].buf_pool->get_buffer ();
         SmartPtr<HandlerParam> geomap_params = new HandlerParam (i);
@@ -715,6 +724,7 @@ StitcherImpl::start_feature_match (
     const uint32_t idx)
 {
 #if ENABLE_FEATURE_MATCH
+    // 在左右重叠区上执行光流匹配，获取水平偏移并转换为 GeoMapper 的缩放因子。
     _overlaps[idx].matcher->reset_offsets ();
     _overlaps[idx].matcher->feature_match (left_buf, right_buf);
 
@@ -1213,4 +1223,3 @@ Stitcher::create_soft_stitcher ()
 }
 
 }
-

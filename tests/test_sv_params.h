@@ -155,6 +155,10 @@ get_fisheye_img_roi_radius (
     return roi_radius;
 }
 
+/* 根据相机配置生成Bowl。
+   FixMe: 对于不同的车型，差宽比差异较大，是否需要生成不同的Bowl.
+   TODO： 如何可视化这个Bowl？
+*/
 BowlDataConfig
 bowl_config (CamModel model)
 {
@@ -162,6 +166,7 @@ bowl_config (CamModel model)
 
     switch (model) {
     case CamB4C1080P: {
+#if 0
         bowl.a = 6060.0f;
         bowl.b = 4388.0f;
         bowl.c = 3003.4f;
@@ -170,6 +175,16 @@ bowl_config (CamModel model)
         bowl.center_z = 1500.0f;
         bowl.wall_height = 1800.0f;
         bowl.ground_length = 3000.0f;
+#else
+        bowl.a           = 1500.0f;   // ≈ 354.6
+        bowl.b           = 800.0f;   // ≈ 163.2
+        bowl.c           = 460.0f;   // ≈ 2 * 214
+        bowl.angle_start = 0.0f;
+        bowl.angle_end   = 360.0f;
+        bowl.center_z    = 225.0f;   // 相机高度
+        bowl.wall_height = 500.0f;   // 视需要，rig 很矮，可以取 300mm 左右
+        bowl.ground_length = 647;//385.0f;
+#endif
         break;
     }
     default:
@@ -180,6 +195,73 @@ bowl_config (CamModel model)
     return bowl;
 }
 
+void _log_bowl_data(BowlDataConfig bowl)
+{
+    XCAM_LOG_INFO ("Bowl Model Data:");
+    XCAM_LOG_INFO ("\ta: %.2f, b: %.2f, c: %.2f",
+                   bowl.a, bowl.b, bowl.c);
+    XCAM_LOG_INFO ("\tangle_start: %.2f, angle_end: %.2f",
+                   bowl.angle_start, bowl.angle_end);
+    XCAM_LOG_INFO ("\tcenter_z: %.2f, wall_height: %.2f, ground_length: %.2f",
+                   bowl.center_z, bowl.wall_height, bowl.ground_length);
+}
+
+BowlDataConfig
+cal_bowl_config (PointFloat3 *camera_pos, int camera_num, float x_view_scope, float y_view_scope)
+{
+    BowlDataConfig bowl;
+
+    if (!camera_pos || camera_num <= 0)
+        return bowl;
+
+    float sum_z = 0.0f;
+    for (int i = 0; i < camera_num; ++i)
+        sum_z += camera_pos[i].z;
+
+    // 椭球中心位于相机位置的平均高度上；
+    bowl.center_z = sum_z / camera_num;
+    bowl.angle_start = 0.0f;
+    bowl.angle_end = 360.0f;
+
+    // c强制为2倍安装高度，使得与地面相交
+    bowl.c = 2.0f * bowl.center_z;
+    if (bowl.c == 0.0f)
+        return bowl;
+
+    const float center_z = bowl.center_z;
+    const float c = bowl.c;
+    const float r = sqrtf (1.0f - center_z * center_z / (c * c)); // 地面椭圆的半径系数
+    const float sqrt2 = 1.41421356237f;
+
+    const int front_idx = 0;
+    const int right_idx = (camera_num > 1) ? 1 : 0;
+    const int rear_idx  = (camera_num > 2) ? 2 : 0;
+    const int left_idx  = (camera_num > 3) ? 3 : 0;
+
+    // 近似车身半长和半宽
+    const float half_length = (camera_pos[front_idx].x - camera_pos[rear_idx].x) * 0.5f;
+    const float half_width  = (camera_pos[left_idx].y - camera_pos[right_idx].y) * 0.5f;
+
+    // Topview四周预留空间
+    const float l_max = (half_length + x_view_scope) * 2.0f; // 为什么要*2.0
+    const float w_max = (half_width + y_view_scope) * 2.0f;
+
+    const float denom = sqrt2 * r;
+    if (denom != 0.0f) {
+        bowl.a = l_max / denom;
+        bowl.b = w_max / denom;
+    }
+
+    bowl.wall_height = 2.0f * bowl.center_z;
+    bowl.ground_length = r * bowl.b - half_width;
+
+    _log_bowl_data(bowl);
+    XCAM_LOG_INFO("Topview Lmax = %.2fmm, Wmax = %.2fmm.\n", l_max, w_max);
+    return bowl;
+}
+
+
+/* Fixme: 这里硬编码写死了每路相机的视角范围，实际安装角度偏差是否要调整？*/
 float *
 viewpoints_range (CamModel model, float *range)
 {
@@ -190,10 +272,10 @@ viewpoints_range (CamModel model, float *range)
         break;
     }
     case CamB4C1080P: {
-        range[0] = 64.0f;
-        range[1] = 160.0f;
-        range[2] = 64.0f;
-        range[3] = 160.0f;
+        range[0] = 110.0f; //64
+        range[1] = 110.0f; //160
+        range[2] = 110.0f;
+        range[3] = 110.0f; // 160.0f
         break;
     }
     case CamC3C4K: {
@@ -240,6 +322,8 @@ viewpoints_range (CamModel model, float *range)
     return range;
 }
 
+
+/* TODO: 特征匹配区域参数没有支持CamB4C1080P? */
 FMRegionRatio
 fm_region_ratio (CamModel model)
 {
@@ -445,6 +529,8 @@ get_fisheye_info (CamModel model, StitchScopicMode scopic_mode, FisheyeInfo* fis
     return ret;
 }
 
+
+/* 仅用于球面贴图场景。Bowl不用该函数。 */
 StitchInfo
 stitch_info (CamModel model, StitchScopicMode scopic_mode)
 {
@@ -707,4 +793,3 @@ stitch_info (CamModel model, StitchScopicMode scopic_mode)
 }
 
 }
-
