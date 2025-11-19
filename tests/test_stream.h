@@ -30,6 +30,7 @@
 
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <vector>
 
 #define XCAM_TEST_STREAM_DEBUG 0
 #define XCAM_TEST_STREAM_FOLDER "."
@@ -45,6 +46,8 @@
 #if XCAM_TEST_OPENCV
 const static cv::Scalar color = cv::Scalar (0, 0, 255);
 const static int fontFace = cv::FONT_HERSHEY_COMPLEX;
+// 用于在输出 MP4 中绘制 img_overlap 区域的调试矩形列表（输出坐标系）。
+static std::vector<XCam::Rect> g_output_img_overlaps;
 #endif
 
 namespace XCam {
@@ -345,6 +348,47 @@ Stream::cv_open_writer ()
     return XCAM_RETURN_NO_ERROR;
 }
 
+static void
+draw_dashed_rectangle (cv::Mat &mat, const Rect &rect,
+                       const cv::Scalar &col, int thickness = 2,
+                       int dash_length = 8, int gap_length = 4)
+{
+    int x0 = rect.pos_x;
+    int y0 = rect.pos_y;
+    int x1 = rect.pos_x + rect.width;
+    int y1 = rect.pos_y + rect.height;
+
+    if (x0 < 0)
+        x0 = 0;
+    if (y0 < 0)
+        y0 = 0;
+    if (x1 > mat.cols)
+        x1 = mat.cols;
+    if (y1 > mat.rows)
+        y1 = mat.rows;
+    if (x0 >= x1 || y0 >= y1)
+        return;
+
+    for (int x = x0; x < x1; x += dash_length + gap_length) {
+        int ex = x + dash_length;
+        if (ex > x1)
+            ex = x1;
+        cv::line (mat, cv::Point (x, y0), cv::Point (ex, y0), col, thickness);
+        cv::line (mat, cv::Point (x, y1 - 1), cv::Point (ex, y1 - 1), col, thickness);
+    }
+
+    if (y1 - y0 <= 1)
+        return;
+
+    for (int y = y0; y < y1; y += dash_length + gap_length) {
+        int ey = y + dash_length;
+        if (ey > y1)
+            ey = y1;
+        cv::line (mat, cv::Point (x0, y), cv::Point (x0, ey), col, thickness);
+        cv::line (mat, cv::Point (x1 - 1, y), cv::Point (x1 - 1, ey), col, thickness);
+    }
+}
+
 void
 Stream::cv_write_buf (char *frame_str)
 {
@@ -358,8 +402,15 @@ Stream::cv_write_buf (char *frame_str)
 #endif
 
     if (_writer.isOpened ()) {
-        if (mat.empty())
+        if (mat.empty ())
             convert_to_mat (_buf, mat);
+
+        if (!g_output_img_overlaps.empty ()) {
+            for (size_t i = 0; i < g_output_img_overlaps.size (); ++i) {
+                const Rect &rect = g_output_img_overlaps[i];
+                draw_dashed_rectangle (mat, rect, color);
+            }
+        }
 
         _writer.write (mat);
     }

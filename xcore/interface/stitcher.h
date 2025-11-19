@@ -235,6 +235,9 @@ public:
     uint32_t get_blend_pyr_levels () {
         return _blend_pyr_levels;
     }
+    const ImageOverlapInfo &get_overlap (uint32_t idx) const {
+        return _overlap_info[idx];
+    }
 
     bool set_viewpoints_range (const float *range);
     bool set_intrinsic_names (const char *intr_names[]);
@@ -242,8 +245,9 @@ public:
 
     virtual XCamReturn stitch_buffers (const VideoBufferList &in_bufs, SmartPtr<VideoBuffer> &out_buf) = 0;
 
-protected:
     XCamReturn init_camera_info ();
+
+protected:
     XCamReturn estimate_round_slices ();
     virtual XCamReturn estimate_coarse_crops ();
     XCamReturn mark_centers ();
@@ -255,9 +259,6 @@ protected:
     }
     const RoundViewSlice &get_round_view_slice (uint32_t idx) const {
         return _round_view_slices[idx];
-    }
-    const ImageOverlapInfo &get_overlap (uint32_t idx) const {
-        return _overlap_info[idx];
     }
     const ImageCropInfo &get_crop (uint32_t idx) const {
         return _crop_info[idx];

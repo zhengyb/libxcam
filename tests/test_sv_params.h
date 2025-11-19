@@ -195,15 +195,17 @@ bowl_config (CamModel model)
     return bowl;
 }
 
-void _log_bowl_data(BowlDataConfig bowl)
+void
+_log_bowl_data (const BowlDataConfig &bowl)
 {
-    XCAM_LOG_INFO ("Bowl Model Data:");
-    XCAM_LOG_INFO ("\ta: %.2f, b: %.2f, c: %.2f",
-                   bowl.a, bowl.b, bowl.c);
-    XCAM_LOG_INFO ("\tangle_start: %.2f, angle_end: %.2f",
-                   bowl.angle_start, bowl.angle_end);
-    XCAM_LOG_INFO ("\tcenter_z: %.2f, wall_height: %.2f, ground_length: %.2f",
-                   bowl.center_z, bowl.wall_height, bowl.ground_length);
+    XCAM_LOG_INFO (
+        "Bowl Model Data:"
+        " a: %.2f, b: %.2f, c: %.2f,"
+        " angle_start: %.2f, angle_end: %.2f,"
+        " center_z: %.2f, wall_height: %.2f, ground_length: %.2f",
+        bowl.a, bowl.b, bowl.c,
+        bowl.angle_start, bowl.angle_end,
+        bowl.center_z, bowl.wall_height, bowl.ground_length);
 }
 
 BowlDataConfig
@@ -273,9 +275,9 @@ viewpoints_range (CamModel model, float *range)
     }
     case CamB4C1080P: {
         range[0] = 110.0f; //64
-        range[1] = 110.0f; //160
+        range[1] = 140.0f; //160
         range[2] = 110.0f;
-        range[3] = 110.0f; // 160.0f
+        range[3] = 140.0f; // 160.0f
         break;
     }
     case CamC3C4K: {

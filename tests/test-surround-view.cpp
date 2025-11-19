@@ -444,6 +444,59 @@ create_cubemap_mapper (
 }
 
 // 写出一帧所有需要的结果：包含主拼接、可选的顶视图和立方体输出。
+
+#if XCAM_TEST_OPENCV
+static void
+update_output_img_overlap (const SmartPtr<Stitcher> &stitcher)
+{
+    g_output_img_overlaps.clear ();
+
+    if (!stitcher->is_overlap_info_set ())
+        return;
+
+    const uint32_t cam_num = stitcher->get_camera_num ();
+    for (uint32_t i = 0; i < cam_num; ++i) {
+        const Stitcher::ImageOverlapInfo &overlap = stitcher->get_overlap (i);
+        const Rect &out = overlap.out_area;
+        if (out.width > 0 && out.height > 0)
+            g_output_img_overlaps.push_back (out);
+    }
+
+    if (stitcher->get_dewarp_mode () != DewarpBowl)
+        return;
+
+    uint32_t out_width = 0, out_height = 0;
+    stitcher->get_output_size (out_width, out_height);
+    if (!out_width || !out_height)
+        return;
+
+    const BowlDataConfig &bowl = stitcher->get_bowl_config ();
+    const float denom = bowl.wall_height + bowl.ground_length;
+    if (denom <= 0.0f)
+        return;
+
+    const float ratio = bowl.wall_height / denom;
+    if (ratio <= 0.0f || ratio >= 1.0f)
+        return;
+
+    const int32_t boundary_y = (int32_t)(ratio * out_height);
+    if (boundary_y < 0 || boundary_y >= (int32_t)out_height)
+        return;
+
+    Rect line_rect;
+    line_rect.pos_x = 0;
+    line_rect.pos_y = boundary_y;
+    line_rect.width = (int32_t)out_width;
+    line_rect.height = 1;
+    g_output_img_overlaps.push_back (line_rect);
+}
+#else
+static void
+update_output_img_overlap (const SmartPtr<Stitcher> &)
+{
+}
+#endif
+
 static void
 write_image (
     const SmartPtr<Stitcher> &stitcher,
@@ -456,7 +509,11 @@ write_image (
 
     if (out_config.save_output) {
         // Bowl view 2D
+        update_output_img_overlap (stitcher);
         write_out_image (outs[out_config.stitch_index], frame_num);
+#if XCAM_TEST_OPENCV
+        g_output_img_overlaps.clear ();
+#endif
     }
 
     if (out_config.save_topview) {
