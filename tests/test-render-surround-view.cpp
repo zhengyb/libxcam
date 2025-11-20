@@ -755,8 +755,8 @@ int main (int argc, char *argv[])
     SmartPtr<RenderOsgModel> sv_model = create_surround_view_model (stitcher, output_width, output_height);
     render->add_model (sv_model);
 
-    //SmartPtr<RenderOsgModel> car_model = create_car_model (car_name);
-    //render->add_model (car_model);
+    SmartPtr<RenderOsgModel> car_model = create_car_model (car_name);
+    render->add_model (car_model);
 
     render->validate_model_groups ();
 
