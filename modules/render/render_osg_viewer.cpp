@@ -90,7 +90,7 @@ RenderOsgViewer::initialize ()
     //_viewer->setCameraManipulator(new osgGA::TrackballManipulator);
 
     //vp_manipulator->setInitialValues (osg::PI, 6.0f, 4.0f, 2.6f);
-    vp_manipulator->setInitialValues (osg::PI, 3.0f, 3.0f, 8.6f);
+    vp_manipulator->setInitialValues (osg::PI, 1.0f, 0.5f, 1.0f);
     _viewer->setCameraManipulator (vp_manipulator);
 
     // 4. 清屏颜色（故意设成蓝色，便于判断）
