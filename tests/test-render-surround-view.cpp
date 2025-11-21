@@ -26,6 +26,7 @@
 #include <calibration_parser.h>
 #include <soft/soft_video_buf_allocator.h>
 
+#include "test_sv_params.h"
 #if ENABLE_DNN
 #include "dnn/inference/dnn_inference_utils.h"
 #include "dnn/inference/dnn_inference_engine.h"
@@ -63,6 +64,7 @@ enum SVModule {
     SVModuleVulkan
 };
 
+#if 0
 static const char *intrinsic_names[] = {
     "intrinsic_camera_front.txt",
     "intrinsic_camera_right.txt",
@@ -78,7 +80,7 @@ static const char *extrinsic_names[] = {
 };
 
 static const float viewpoints_range[] = {110.0f, 140.0f, 110.0f, 140.0f};
-
+#endif
 static const char VtxShaderCar[] = ""
                                    "#version 330 compatibility                                     \n"
                                    "out vec4 v_color;                                             \n"
@@ -450,14 +452,14 @@ create_car_model (const char *name)
             0, wheel_texture.get (), osg::StateAttribute::ON);
     }
 
-    float translation_x = -0.0f;
+    float translation_x = 0.0f;
     float translation_y = 0.0f;
     float translation_z = 0.0f;//0.5f;
     float rotation_x = 0.0f;
     float rotation_y = 0.0f;
     float rotation_z = 1.0f;
     float rotation_degrees = -180.0;
-    float scale_factor = 0.05;
+    float scale_factor = 0.03;
 
     car_model->setup_model_matrix (
         translation_x,
@@ -872,21 +874,45 @@ int main (int argc, char *argv[])
     stitcher->set_scale_mode (scale_mode);
     stitcher->set_fm_mode (fm_mode);
 
-    stitcher->set_viewpoints_range (viewpoints_range);
+    float *vp_range = new float[XCAM_STITCH_FISHEYE_MAX_NUM];
+    stitcher->set_viewpoints_range (viewpoints_range (CamB4C1080P, vp_range));
     stitcher->set_intrinsic_names (intrinsic_names);
     stitcher->set_extrinsic_names (extrinsic_names);
 
+
+
+
+    PointFloat3 camera_poss[XCAM_STITCH_MAX_CAMERAS];
+
+    stitcher->init_camera_info (); // 提前提取camera info
+    const uint32_t cam_num = stitcher->get_camera_num ();
+
+    for (uint32_t i = 0; i < cam_num && i < XCAM_STITCH_MAX_CAMERAS; ++i) {
+        CameraInfo cam_info;
+        if (!stitcher->get_camera_info (i, cam_info)) {
+            XCAM_LOG_ERROR ("fail to get info for %dth camera\n", i);
+            continue;
+        }
+
+        const ExtrinsicParameter &extr = cam_info.calibration.extrinsic;
+        camera_poss[i].x = extr.trans_x;
+        camera_poss[i].y = extr.trans_y;
+        camera_poss[i].z = extr.trans_z;
+    }
+
+    BowlDataConfig bowl = cal_bowl_config (camera_poss, cam_num, 600.0f, 400.0f);
+#if 0
     //a: 1157.12, b: 734.82, c: 428.39, angle_start: 0.00, angle_end: 360.00, center_z: 214.19, wall_height: 428.39, ground_length: 586.39
     BowlDataConfig bowl;
-
-    bowl.a = 1160.0f;
-    bowl.b = 735.0f;
-    bowl.c = 428.0f;
+    bowl.a = 5160.0f;
+    bowl.b = 2735.0f;
+    bowl.c = 2428.0f;
     bowl.center_z = 214.0f;
-    bowl.wall_height = 428.0f;
-    bowl.ground_length = 586.4f;
+    bowl.wall_height = 1428.0f;
+    bowl.ground_length = 1586.4f;
     bowl.angle_start = 0.0f;
     bowl.angle_end = 360.0f;
+#endif
     stitcher->set_bowl_config (bowl);
 
     SmartPtr<RenderOsgViewer> render = new RenderOsgViewer ();
