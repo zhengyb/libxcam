@@ -97,7 +97,8 @@ public:
         float rotation_x,
         float rotation_y,
         float rotation_z,
-        float rotation_degrees);
+        float rotation_degrees,
+        float scale_factor);
 
     XCamReturn update_texture (SmartPtr<VideoBuffer> &buffer);
 

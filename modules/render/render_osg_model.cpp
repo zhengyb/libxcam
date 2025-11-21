@@ -214,7 +214,8 @@ RenderOsgModel::setup_model_matrix (
     float rotation_x,
     float rotation_y,
     float rotation_z,
-    float rotation_degrees)
+    float rotation_degrees,
+    float scale_factor)
 {
     XCamReturn result = XCAM_RETURN_NO_ERROR;
 
@@ -223,7 +224,7 @@ RenderOsgModel::setup_model_matrix (
 
     const osg::Vec3f axis(rotation_x, rotation_y, rotation_z);
     osg::ref_ptr<osg::MatrixTransform> mat = new osg::MatrixTransform ();
-    mat->setMatrix (osg::Matrix::scale (osg::Vec3 (1.0, 1.0, 1.0)) *
+    mat->setMatrix (osg::Matrix::scale (osg::Vec3 (scale_factor, scale_factor, scale_factor)) *
                     osg::Matrix::rotate ((rotation_degrees / 180.f) * osg::PI_2, axis) *
                     osg::Matrix::translate (osg::Vec3 (translation_x, translation_y, translation_z)));
 
