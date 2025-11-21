@@ -97,9 +97,10 @@ RenderOsgViewer::initialize ()
     _viewer->getCamera()->setClearColor(osg::Vec4(0.2f, 0.4f, 0.8f, 1.0f));
 
     _viewer->getCamera ()->setClearMask (GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    _viewer->getCamera ()->setComputeNearFarMode (osg::Camera::DO_NOT_COMPUTE_NEAR_FAR);
-    // 5. 让 OSG 自动算 near/far，避免裁剪导致看不到
-    //_viewer->getCamera()->setComputeNearFarMode(osg::CullSettings::COMPUTE_NEAR_FAR_USING_BOUNDING_VOLUMES);
+    //_viewer->getCamera ()->setComputeNearFarMode (osg::Camera::DO_NOT_COMPUTE_NEAR_FAR);
+    //避免相机贴近车体时被裁掉外壳
+    // 5. 让 OSG 自动算 near/far，避免裁剪导致看不到， 避免相机贴近车体时被裁掉外壳
+    _viewer->getCamera()->setComputeNearFarMode(osg::CullSettings::COMPUTE_NEAR_FAR_USING_BOUNDING_VOLUMES);
 
     //_viewer->getCamera ()->setViewport (0, 0, win_width, win_height);
 #endif

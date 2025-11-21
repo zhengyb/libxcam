@@ -137,7 +137,7 @@ RenderOsgModel::setup_shader_program (
 
     _model->getOrCreateStateSet ()->setAttributeAndModes (_program, osg::StateAttribute::ON);
     //_model->getOrCreateStateSet ()->setMode (GL_DEPTH_TEST, osg::StateAttribute::ON);
-    _model->getOrCreateStateSet ()->setMode (GL_DEPTH_TEST, osg::StateAttribute::OFF);
+    _model->getOrCreateStateSet ()->setMode (GL_DEPTH_TEST, osg::StateAttribute::ON);
 
     return result;
 }
