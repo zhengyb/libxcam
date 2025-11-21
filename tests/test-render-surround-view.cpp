@@ -48,6 +48,7 @@
 #include <osg/Uniform>
 #include <osg/StateSet>
 #include <osg/Texture>
+#include <osg/PolygonMode>
 
 using namespace XCam;
 
@@ -441,17 +442,21 @@ create_car_model (const char *name)
 
     car_model->setup_shader_program ("Car", osg::Shader::VERTEX, VtxShaderCar);
     car_model->setup_shader_program ("Car", osg::Shader::FRAGMENT, FrgShaderCar);
-
+#if 0
     osg::ref_ptr<osg::Uniform> wheel_sampler = new osg::Uniform (osg::Uniform::SAMPLER_2D, "textureWheel");
     wheel_sampler->set (0);
     car_model->get_model ()->getOrCreateStateSet ()->addUniform (wheel_sampler);
-    car_model->get_model ()->getOrCreateStateSet ()->setMode (GL_DEPTH_TEST, osg::StateAttribute::ON);
+    osg::StateSet *car_state = car_model->get_model ()->getOrCreateStateSet ();
+    car_state->setMode (GL_DEPTH_TEST, osg::StateAttribute::ON);
+    osg::ref_ptr<osg::PolygonMode> pm = new osg::PolygonMode;
+    pm->setMode (osg::PolygonMode::FRONT_AND_BACK, osg::PolygonMode::FILL);
+    car_state->setAttributeAndModes (pm, osg::StateAttribute::ON);
     osg::ref_ptr<osg::Texture> wheel_texture = find_first_texture (car_model->get_model ());
     if (wheel_texture.valid ()) {
         car_model->get_model ()->getOrCreateStateSet ()->setTextureAttributeAndModes (
             0, wheel_texture.get (), osg::StateAttribute::ON);
     }
-
+#endif
     float translation_x = 0.0f;
     float translation_y = 0.0f;
     float translation_z = 0.0f;//0.5f;
