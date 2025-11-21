@@ -216,6 +216,7 @@ test_render_surround_view_LDADD = \
     $(TEST_GLES_LA)   \
     $(TEST_VK_LA)     \
     $(TEST_RENDER_LA) \
+    $(LIBOSG_LIBS)    \
     $(NULL)
 endif
 
@@ -235,4 +236,3 @@ test_dnn_inference_LDADD = \
     $(TEST_DNN_LA)  \
     $(NULL)
 endif
-

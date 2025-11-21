@@ -44,6 +44,9 @@
 #include <render/render_osg_viewer.h>
 #include <render/render_osg_model.h>
 #include <render/render_osg_shader.h>
+#include <osg/Uniform>
+#include <osg/StateSet>
+#include <osg/Texture>
 
 using namespace XCam;
 
@@ -74,10 +77,10 @@ static const char *extrinsic_names[] = {
     "extrinsic_camera_left.txt"
 };
 
-static const float viewpoints_range[] = {64.0f, 160.0f, 64.0f, 160.0f};
+static const float viewpoints_range[] = {110.0f, 140.0f, 110.0f, 140.0f};
 
 static const char VtxShaderCar[] = ""
-                                   "precision highp float;                                        \n"
+                                   "#version 120                                                   \n"
                                    "uniform mat4 osg_ModelViewProjectionMatrix;                   \n"
                                    "uniform mat4 osg_ModelViewMatrix;                             \n"
                                    "uniform mat3 osg_NormalMatrix;                                \n"
@@ -91,10 +94,10 @@ static const char VtxShaderCar[] = ""
                                    "varying vec2 texCoord0;                                       \n"
                                    "void main()                                                   \n"
                                    "{                                                             \n"
-                                   "    vec4 light = vec4(0.0,100.0, 100.0, 1.0);                 \n"
+                                   "    vec4 light = vec4(0.0, 100.0, 100.0, 1.0);                \n"
                                    "    vec4 lightColorSpec = vec4(1.0, 1.0, 1.0, 1.0);           \n"
                                    "    vec4 lightColorDiffuse = vec4(1.0, 1.0, 1.0, 1.0);        \n"
-                                   "    vec4 lightColorAmbient = vec4(0.3, 0.3, .3, 1.0);         \n"
+                                   "    vec4 lightColorAmbient = vec4(0.3, 0.3, 0.3, 1.0);        \n"
                                    "    vec4 carColorAmbient = vec4(0.0, 0.0, 1.0, 1.0);          \n"
                                    "    vec4 carColorDiffuse = vec4(0.0, 0.0, 1.0, 1.0);          \n"
                                    "    vec4 carColorSpec = vec4(1.0, 1.0, 1.0, 1.0);             \n"
@@ -103,19 +106,62 @@ static const char VtxShaderCar[] = ""
                                    "    vec3 s = normalize(vec3(light - eye));                    \n"
                                    "    vec3 v = normalize(-eye.xyz);                             \n"
                                    "    vec3 r = reflect(-s, tnorm);                              \n"
-                                   "    diffuseLight = max(0.0, dot( s, tnorm));                  \n"
+                                   "    diffuseLight = max(0.0, dot(s, tnorm));                   \n"
                                    "    specLight = 0.0;                                          \n"
-                                   "    if(diffuseLight > 0.0)                                    \n"
-                                   "    {                                                         \n"
-                                   "        specLight = pow(max(0.0, dot(r,v)), 10.0);            \n"
+                                   "    if (diffuseLight > 0.0) {                                 \n"
+                                   "        specLight = pow(max(0.0, dot(r, v)), 10.0);           \n"
                                    "    }                                                         \n"
-                                   "    texCoord0 = osg_MultiTexCoord0;                               \n"
-                                   "    v_color = (specLight *  lightColorSpec * carColorSpec) + (carColorDiffuse * lightColorDiffuse * diffuseLight) + lightColorAmbient * carColorAmbient;   \n"
-                                   "    gl_Position = osg_ModelViewProjectionMatrix * osg_Vertex;     \n"
-                                   "}                                                \n";
+                                   "    texCoord0 = osg_MultiTexCoord0;                           \n"
+                                   "    v_color = (specLight * lightColorSpec * carColorSpec) +   \n"
+                                   "              (carColorDiffuse * lightColorDiffuse * diffuseLight) +\n"
+                                   "              lightColorAmbient * carColorAmbient;            \n"
+                                   "    gl_Position = osg_ModelViewProjectionMatrix * osg_Vertex; \n"
+                                   "}                                                             \n";
+
+static osg::Texture*
+find_first_texture (osg::Node *node)
+{
+    if (!node)
+        return NULL;
+
+    osg::StateSet *state = node->getStateSet ();
+    if (state) {
+        osg::StateAttribute *attr = state->getTextureAttribute (0, osg::StateAttribute::TEXTURE);
+        osg::Texture *tex = dynamic_cast<osg::Texture *> (attr);
+        if (tex)
+            return tex;
+    }
+
+    osg::Geode *geode = node->asGeode ();
+    if (geode) {
+        for (uint32_t i = 0; i < geode->getNumDrawables (); ++i) {
+            osg::Drawable *drawable = geode->getDrawable (i);
+            if (!drawable)
+                continue;
+            osg::StateSet *drawable_state = drawable->getStateSet ();
+            if (!drawable_state)
+                continue;
+            osg::StateAttribute *attr = drawable_state->getTextureAttribute (0, osg::StateAttribute::TEXTURE);
+            osg::Texture *tex = dynamic_cast<osg::Texture *> (attr);
+            if (tex)
+                return tex;
+        }
+    }
+
+    osg::Group *group = node->asGroup ();
+    if (group) {
+        for (uint32_t i = 0; i < group->getNumChildren (); ++i) {
+            osg::Texture *tex = find_first_texture (group->getChild (i));
+            if (tex)
+                return tex;
+        }
+    }
+
+    return NULL;
+}
 
 static const char FrgShaderCar[] = ""
-                                   "precision highp float;                                                      \n"
+                                   "#version 120                                                                \n"
                                    "varying vec4 v_color;                                                       \n"
                                    "varying float diffuseLight;                                                 \n"
                                    "varying float specLight;                                                    \n"
@@ -125,10 +171,70 @@ static const char FrgShaderCar[] = ""
                                    "{                                                                           \n"
                                    "    vec4 lightColorSpec = vec4(1.0, 1.0, 1.0, 1.0);                         \n"
                                    "    vec4 lightColorDiffuse = vec4(1.0, 1.0, 1.0, 1.0);                      \n"
-                                   "    vec4 lightColorAmbient = vec4(0.3, 0.3, .3, 1.0);                       \n"
+                                   "    vec4 lightColorAmbient = vec4(0.3, 0.3, 0.3, 1.0);                      \n"
                                    "    vec4 base = texture2D(textureWheel, texCoord0.st);                      \n"
-                                   "    gl_FragColor = (specLight *  lightColorSpec * base) + (base * lightColorDiffuse * diffuseLight) + lightColorAmbient * base ; \n"
+                                   "    if (dot(base.rgb, base.rgb) < 1e-6)                                     \n"
+                                   "        base = v_color;                                                     \n"
+                                   "    gl_FragColor = (specLight * lightColorSpec * base) +                    \n"
+                                   "                   (base * lightColorDiffuse * diffuseLight) +              \n"
+                                   "                   lightColorAmbient * base;                                \n"
                                    "}                                                                           \n";
+
+
+static const char VtxShaderCar_es[] = ""
+                                      "precision highp float;                                        \n"
+                                      "uniform mat4 osg_ModelViewProjectionMatrix;                   \n"
+                                      "uniform mat4 osg_ModelViewMatrix;                             \n"
+                                      "uniform mat3 osg_NormalMatrix;                                \n"
+                                      "attribute vec3 osg_Normal;                                    \n"
+                                      "attribute vec4 osg_Color;                                     \n"
+                                      "attribute vec4 osg_Vertex;                                    \n"
+                                      "varying vec4 v_color;                                         \n"
+                                      "varying float diffuseLight;                                   \n"
+                                      "varying float specLight;                                      \n"
+                                      "attribute vec2 osg_MultiTexCoord0;                            \n"
+                                      "varying vec2 texCoord0;                                       \n"
+                                      "void main()                                                   \n"
+                                      "{                                                             \n"
+                                      "    vec4 light = vec4(0.0,100.0, 100.0, 1.0);                 \n"
+                                      "    vec4 lightColorSpec = vec4(1.0, 1.0, 1.0, 1.0);           \n"
+                                      "    vec4 lightColorDiffuse = vec4(1.0, 1.0, 1.0, 1.0);        \n"
+                                      "    vec4 lightColorAmbient = vec4(0.3, 0.3, .3, 1.0);         \n"
+                                      "    vec4 carColorAmbient = vec4(0.0, 0.0, 1.0, 1.0);          \n"
+                                      "    vec4 carColorDiffuse = vec4(0.0, 0.0, 1.0, 1.0);          \n"
+                                      "    vec4 carColorSpec = vec4(1.0, 1.0, 1.0, 1.0);             \n"
+                                      "    vec3 tnorm = normalize(osg_NormalMatrix * osg_Normal);    \n"
+                                      "    vec4 eye = osg_ModelViewMatrix * osg_Vertex;              \n"
+                                      "    vec3 s = normalize(vec3(light - eye));                    \n"
+                                      "    vec3 v = normalize(-eye.xyz);                             \n"
+                                      "    vec3 r = reflect(-s, tnorm);                              \n"
+                                      "    diffuseLight = max(0.0, dot( s, tnorm));                  \n"
+                                      "    specLight = 0.0;                                          \n"
+                                      "    if(diffuseLight > 0.0)                                    \n"
+                                      "    {                                                         \n"
+                                      "        specLight = pow(max(0.0, dot(r,v)), 10.0);            \n"
+                                      "    }                                                         \n"
+                                      "    texCoord0 = osg_MultiTexCoord0;                               \n"
+                                      "    v_color = (specLight *  lightColorSpec * carColorSpec) + (carColorDiffuse * lightColorDiffuse * diffuseLight) + lightColorAmbient * carColorAmbient;   \n"
+                                      "    gl_Position = osg_ModelViewProjectionMatrix * osg_Vertex;     \n"
+                                      "}                                                \n";
+
+
+static const char FrgShaderCar_es[] = ""
+                                      "precision highp float;                                                      \n"
+                                      "varying vec4 v_color;                                                       \n"
+                                      "varying float diffuseLight;                                                 \n"
+                                      "varying float specLight;                                                    \n"
+                                      "uniform sampler2D textureWheel;                                             \n"
+                                      "varying vec2 texCoord0;                                                     \n"
+                                      "void main()                                                                 \n"
+                                      "{                                                                           \n"
+                                      "    vec4 lightColorSpec = vec4(1.0, 1.0, 1.0, 1.0);                         \n"
+                                      "    vec4 lightColorDiffuse = vec4(1.0, 1.0, 1.0, 1.0);                      \n"
+                                      "    vec4 lightColorAmbient = vec4(0.3, 0.3, .3, 1.0);                       \n"
+                                      "    vec4 base = texture2D(textureWheel, texCoord0.st);                      \n"
+                                      "    gl_FragColor = (specLight *  lightColorSpec * base) + (base * lightColorDiffuse * diffuseLight) + lightColorAmbient * base ; \n"
+                                      "}       \n";
 
 class SVStream
     : public Stream
@@ -276,8 +382,14 @@ create_surround_view_model (
 {
     SmartPtr<RenderOsgModel> svm_model = new RenderOsgModel ("svm model", texture_width, texture_height);
 
-    //svm_model->setup_shader_program ("SVM", osg::Shader::VERTEX, VtxShaderProjectNV12Texture);
-    //svm_model->setup_shader_program ("SVM", osg::Shader::FRAGMENT, FrgShaderProjectNV12Texture);
+#if 0
+    svm_model->setup_shader_program ("SVM", osg::Shader::VERTEX, DebugVert);
+    svm_model->setup_shader_program ("SVM", osg::Shader::FRAGMENT, DebugFrag);
+#else
+    svm_model->setup_shader_program ("SVM", osg::Shader::VERTEX, VtxShaderProjectNV12Texture);
+    svm_model->setup_shader_program ("SVM", osg::Shader::FRAGMENT, FrgShaderProjectNV12Texture);
+
+#endif
 
     BowlModel::VertexMap vertices;
     BowlModel::PointMap points;
@@ -291,6 +403,21 @@ create_surround_view_model (
 
     get_bowl_model (stitcher, vertices, points, indices,
                     a, b, c, res_ratio, texture_width, texture_height );
+
+    if (points.empty ()) {
+        XCAM_LOG_WARNING ("bowl texcoord points are empty");
+    } else {
+        float min_s = points[0].x, max_s = points[0].x;
+        float min_t = points[0].y, max_t = points[0].y;
+        for (size_t i = 1; i < points.size (); ++i) {
+            min_s = std::min (min_s, points[i].x);
+            max_s = std::max (max_s, points[i].x);
+            min_t = std::min (min_t, points[i].y);
+            max_t = std::max (max_t, points[i].y);
+        }
+        XCAM_LOG_WARNING ("bowl texcoord count:%zu s[min,max]=[%f,%f] t[min,max]=[%f,%f]",
+                          points.size (), min_s, max_s, min_t, max_t);
+    }
 
     svm_model->setup_vertex_model (vertices, points, indices, a / scaling, b / scaling, c / scaling);
 
@@ -319,9 +446,19 @@ create_car_model (const char *name)
     //car_model->setup_shader_program ("Car", osg::Shader::VERTEX, VtxShaderCar);
     //car_model->setup_shader_program ("Car", osg::Shader::FRAGMENT, FrgShaderCar);
 
+    osg::ref_ptr<osg::Uniform> wheel_sampler = new osg::Uniform (osg::Uniform::SAMPLER_2D, "textureWheel");
+    wheel_sampler->set (0);
+    car_model->get_model ()->getOrCreateStateSet ()->addUniform (wheel_sampler);
+    car_model->get_model ()->getOrCreateStateSet ()->setMode (GL_DEPTH_TEST, osg::StateAttribute::ON);
+    osg::ref_ptr<osg::Texture> wheel_texture = find_first_texture (car_model->get_model ());
+    if (wheel_texture.valid ()) {
+        car_model->get_model ()->getOrCreateStateSet ()->setTextureAttributeAndModes (
+            0, wheel_texture.get (), osg::StateAttribute::ON);
+    }
+
     float translation_x = -0.0f;
     float translation_y = 0.0f;
-    float translation_z = 0.0f;
+    float translation_z = 0.5f;//0.5f;
     float rotation_x = 0.0f;
     float rotation_y = 0.0f;
     float rotation_z = 1.0f;
@@ -764,9 +901,11 @@ int main (int argc, char *argv[])
     render->add_model (sv_model);
 
     SmartPtr<RenderOsgModel> car_model = create_car_model (car_name);
-    render->add_model (car_model);
+    //render->add_model (car_model);
 
     render->validate_model_groups ();
+
+    //XCAM_LOG_WARNING("GL_VERSION: %s, GLSL: %s", glGetString(GL_VERSION), glGetString(GL_SHADING_LANGUAGE_VERSION));
 
     render->start_render ();
 

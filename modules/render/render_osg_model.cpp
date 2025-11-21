@@ -194,12 +194,21 @@ RenderOsgModel::setup_vertex_model (
 
     if (points.size () > 0) {
         geometry->setTexCoordArray (0, tex_coord_array.get ());
+    } else {
+        XCAM_LOG_WARNING ("setup_vertex_model: texcoord points empty");
     }
 
     if (indices.size () > 0) {
         geometry->addPrimitiveSet (index_array.get ());
     } else {
         geometry->addPrimitiveSet (new osg::DrawArrays (GL_TRIANGLE_FAN, 0, 4));
+    }
+
+    osg::Array *tc = geometry->getTexCoordArray (0);
+    if (!tc) {
+        XCAM_LOG_WARNING ("setup_vertex_model: texcoord array not bound, points size:%zu", points.size ());
+    } else {
+        XCAM_LOG_WARNING ("setup_vertex_model: texcoord bound, elements:%u", tc->getNumElements ());
     }
 
     model->addChild (geode);
@@ -263,12 +272,12 @@ RenderOsgModel::update_texture (SmartPtr<VideoBuffer> &buffer)
             uint8_t* src_uv = image_buffer + image_width * image_height;
 
             image_y->setImage (image_width, image_height, 1,
-                               GL_LUMINANCE, GL_LUMINANCE, GL_UNSIGNED_BYTE,
+                               //GL_LUMINANCE, GL_LUMINANCE, GL_UNSIGNED_BYTE,
+                               GL_RED, GL_RED, GL_UNSIGNED_BYTE,
                                src_y, osg::Image::NO_DELETE);
 
             image_uv->setImage (image_width / 2, image_height / 2, 1,
-                                GL_LUMINANCE, GL_RG, GL_UNSIGNED_BYTE,
-                                //GL_LUMINANCE_ALPHA, GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE,
+                                GL_RG, GL_RG, GL_UNSIGNED_BYTE,
                                 src_uv, osg::Image::NO_DELETE);
 
             _texture->_texture_y->setImage (image_y);
