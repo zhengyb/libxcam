@@ -41,6 +41,7 @@ make -j"$(nproc)"
 
 ## 4. 运行前环境变量
 ```bash
+PWD=`pwd`
 export LD_LIBRARY_PATH=$PWD/xcore/.libs:$PWD/modules/soft/.libs:\
 $PWD/modules/ocv/.libs:$PWD/modules/render/.libs:$LD_LIBRARY_PATH
 export FISHEYE_CONFIG_PATH=$PWD/calib_params
