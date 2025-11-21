@@ -83,6 +83,7 @@ public:
         mWidth = width;
         mHeight = height;
         mMinHeight = height / 2.0f;
+        mMaxHeight = height * 2.0f; // zyb
 
         mUp = osg::Vec3d(0.0f, 0.0f, 1.0f);
     }

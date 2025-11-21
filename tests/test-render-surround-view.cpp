@@ -276,8 +276,8 @@ create_surround_view_model (
 {
     SmartPtr<RenderOsgModel> svm_model = new RenderOsgModel ("svm model", texture_width, texture_height);
 
-    svm_model->setup_shader_program ("SVM", osg::Shader::VERTEX, VtxShaderProjectNV12Texture);
-    svm_model->setup_shader_program ("SVM", osg::Shader::FRAGMENT, FrgShaderProjectNV12Texture);
+    //svm_model->setup_shader_program ("SVM", osg::Shader::VERTEX, VtxShaderProjectNV12Texture);
+    //svm_model->setup_shader_program ("SVM", osg::Shader::FRAGMENT, FrgShaderProjectNV12Texture);
 
     BowlModel::VertexMap vertices;
     BowlModel::PointMap points;
@@ -316,16 +316,17 @@ create_car_model (const char *name)
 
     SmartPtr<RenderOsgModel> car_model = new RenderOsgModel (car_model_path.c_str(), true);
 
-    car_model->setup_shader_program ("Car", osg::Shader::VERTEX, VtxShaderCar);
-    car_model->setup_shader_program ("Car", osg::Shader::FRAGMENT, FrgShaderCar);
+    //car_model->setup_shader_program ("Car", osg::Shader::VERTEX, VtxShaderCar);
+    //car_model->setup_shader_program ("Car", osg::Shader::FRAGMENT, FrgShaderCar);
 
-    float translation_x = -0.3f;
+    float translation_x = -0.0f;
     float translation_y = 0.0f;
     float translation_z = 0.0f;
     float rotation_x = 0.0f;
     float rotation_y = 0.0f;
     float rotation_z = 1.0f;
     float rotation_degrees = -180.0;
+    float scale_factor = 0.05;
 
     car_model->setup_model_matrix (
         translation_x,
@@ -334,7 +335,8 @@ create_car_model (const char *name)
         rotation_x,
         rotation_y,
         rotation_z,
-        rotation_degrees);
+        rotation_degrees,
+        scale_factor);
 
     return car_model;
 }
@@ -743,9 +745,15 @@ int main (int argc, char *argv[])
     stitcher->set_intrinsic_names (intrinsic_names);
     stitcher->set_extrinsic_names (extrinsic_names);
 
+    //a: 1157.12, b: 734.82, c: 428.39, angle_start: 0.00, angle_end: 360.00, center_z: 214.19, wall_height: 428.39, ground_length: 586.39
     BowlDataConfig bowl;
-    bowl.wall_height = 1800.0f;
-    bowl.ground_length = 3000.0f;
+
+    bowl.a = 1160.0f;
+    bowl.b = 735.0f;
+    bowl.c = 428.0f;
+    bowl.center_z = 214.0f;
+    bowl.wall_height = 428.0f;
+    bowl.ground_length = 586.4f;
     bowl.angle_start = 0.0f;
     bowl.angle_end = 360.0f;
     stitcher->set_bowl_config (bowl);
