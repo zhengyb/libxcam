@@ -136,7 +136,8 @@ RenderOsgModel::setup_shader_program (
     _program->addShader (new osg::Shader (type, source_text));
 
     _model->getOrCreateStateSet ()->setAttributeAndModes (_program, osg::StateAttribute::ON);
-    _model->getOrCreateStateSet ()->setMode (GL_DEPTH_TEST, osg::StateAttribute::ON);
+    //_model->getOrCreateStateSet ()->setMode (GL_DEPTH_TEST, osg::StateAttribute::ON);
+    _model->getOrCreateStateSet ()->setMode (GL_DEPTH_TEST, osg::StateAttribute::OFF);
 
     return result;
 }
@@ -267,6 +268,7 @@ RenderOsgModel::update_texture (SmartPtr<VideoBuffer> &buffer)
 
             image_uv->setImage (image_width / 2, image_height / 2, 1,
                                 GL_LUMINANCE, GL_RG, GL_UNSIGNED_BYTE,
+                                //GL_LUMINANCE_ALPHA, GL_LUMINANCE_ALPHA, GL_UNSIGNED_BYTE,
                                 src_uv, osg::Image::NO_DELETE);
 
             _texture->_texture_y->setImage (image_y);

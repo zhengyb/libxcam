@@ -24,6 +24,8 @@
 #include <osgGA/TrackballManipulator>
 #include <osg/ShapeDrawable>
 #include <osg/MatrixTransform>
+#include <osg/DisplaySettings>
+#include <osg/GL>
 #include <string>
 
 namespace XCam {
@@ -50,6 +52,10 @@ XCamReturn
 RenderOsgViewer::initialize ()
 {
     XCamReturn result = XCAM_RETURN_NO_ERROR;
+
+    osg::ref_ptr<osg::DisplaySettings> ds = osg::DisplaySettings::instance ();
+    ds->setGLContextVersion ("3.3");
+    ds->setGLContextProfileMask (GL_CONTEXT_COMPATIBILITY_PROFILE_BIT);
 
     osg::GraphicsContext::WindowingSystemInterface* wsi = osg::GraphicsContext::getWindowingSystemInterface();
     uint32_t win_width = 1920;
@@ -156,4 +162,3 @@ RenderOsgViewer::validate_model_groups ()
 }
 
 } // namespace XCam
-
